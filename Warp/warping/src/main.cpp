@@ -26,44 +26,44 @@ bool PointInTriangleBarycentric(
         float sx, float sy,
         float *wt0, float *wt1, float *wt2) {
 
-	x0 /= w0;
-	y0 /= w0;
-	x1 /= w1;
-	y1 /= w1;
-	x2 /= w2;
-	y2 /= w2;
+    x0 /= w0;
+    y0 /= w0;
+    x1 /= w1;
+    y1 /= w1;
+    x2 /= w2;
+    y2 /= w2;
 
-	float v0x = x2 - x0, v0y = y2 - y0;
-	float v1x = x1 - x0, v1y = y1 - y0;
-	float v2x = sx - x0, v2y = sy - y0;
+    float v0x = x2 - x0, v0y = y2 - y0;
+    float v1x = x1 - x0, v1y = y1 - y0;
+    float v2x = sx - x0, v2y = sy - y0;
 
-	float area = 0.5f * (v1x * v0y - v1y * v0x);
-	if (area <= 0.) {
-		// backfacing
-		return false;
-	}
+    float area = 0.5f * (v1x * v0y - v1y * v0x);
+    if (area <= 0.) {
+        // backfacing
+        return false;
+    }
 
-	float dot00 = DOT2(v0, v0);
-	float dot01 = DOT2(v0, v1);
-	float dot11 = DOT2(v1, v1);
-	float denom = (dot00 * dot11 - dot01 * dot01);
-	if (denom == 0)
-		return false;
-	float invDenom = 1.f / denom;
+    float dot00 = DOT2(v0, v0);
+    float dot01 = DOT2(v0, v1);
+    float dot11 = DOT2(v1, v1);
+    float denom = (dot00 * dot11 - dot01 * dot01);
+    if (denom == 0)
+        return false;
+    float invDenom = 1.f / denom;
 
-	float dot02 = DOT2(v0, v2);
-	float dot12 = DOT2(v1, v2);
+    float dot02 = DOT2(v0, v2);
+    float dot12 = DOT2(v1, v2);
 
-	// Compute barycentric coordinates
-	float b2 = (dot11 * dot02 - dot01 * dot12) * invDenom;
-	float b1 = (dot00 * dot12 - dot01 * dot02) * invDenom;
-	float b0 = 1.f - b1 - b2;
+    // Compute barycentric coordinates
+    float b2 = (dot11 * dot02 - dot01 * dot12) * invDenom;
+    float b1 = (dot00 * dot12 - dot01 * dot02) * invDenom;
+    float b0 = 1.f - b1 - b2;
 
-	*wt0 = b0;
-	*wt1 = b1;
-	*wt2 = b2;
+    *wt0 = b0;
+    *wt1 = b1;
+    *wt2 = b2;
 
-	return (b0 > 0. && b1 > 0 && b2 > 0);
+    return (b0 > 0. && b1 > 0 && b2 > 0);
 }
 
 inline 
@@ -73,37 +73,37 @@ bool PointInTriangleLK (
         float x2, float y2, float w2,
         float sx, float sy,
         float *wt0, float *wt1, float *wt2) {
-	float X[3], Y[3];
+    float X[3], Y[3];
 
-	X[0] = x0 - sx*w0;
-	X[1] = x1 - sx*w1;
-	X[2] = x2 - sx*w2;
+    X[0] = x0 - sx*w0;
+    X[1] = x1 - sx*w1;
+    X[2] = x2 - sx*w2;
 
-	Y[0] = y0 - sy*w0;
-	Y[1] = y1 - sy*w1;
-	Y[2] = y2 - sy*w2;
+    Y[0] = y0 - sy*w0;
+    Y[1] = y1 - sy*w1;
+    Y[2] = y2 - sy*w2;
 
-	float d01 = X[0] * Y[1] - Y[0] * X[1];
-	float d12 = X[1] * Y[2] - Y[1] * X[2];
-	float d20 = X[2] * Y[0] - Y[2] * X[0];
+    float d01 = X[0] * Y[1] - Y[0] * X[1];
+    float d12 = X[1] * Y[2] - Y[1] * X[2];
+    float d20 = X[2] * Y[0] - Y[2] * X[0];
 
-	if ((d01 < 0) & (d12 < 0) & (d20 < 0)) {
-		// backfacing
-		return false;
-	}
+    if ((d01 < 0) & (d12 < 0) & (d20 < 0)) {
+        // backfacing
+        return false;
+    }
 
-	float OneOverD = 1.f / (d01 + d12 + d20);
-	d01 *= OneOverD;
-	d12 *= OneOverD;
-	d20 *= OneOverD;
+    float OneOverD = 1.f / (d01 + d12 + d20);
+    d01 *= OneOverD;
+    d12 *= OneOverD;
+    d20 *= OneOverD;
 
-	*wt0 = d12;
-	*wt1 = d20;
-	*wt2 = d01;
+    *wt0 = d12;
+    *wt1 = d20;
+    *wt2 = d01;
 
-	return (d01 >= 0 && d12 >= 0 && d20 >= 0);
+    return (d01 >= 0 && d12 >= 0 && d20 >= 0);
 }
-	
+    
 vec2f toVec2(float2 p) {
     return vec2f(p.x, p.y);
 }
@@ -111,7 +111,7 @@ vec2f toVec2(float2 p) {
 void rasterizeTriangle(ColorImageR8G8B8 &result, 
         float2 p0, float2 p1, float2 p2, 
         vec3f c0, vec3f c1, vec3f c2,
-        bool truncated=false) {
+        bool ismask=false) {
 
     vec2f t0 = toVec2(p0);
     vec2f t1 = toVec2(p1);
@@ -131,7 +131,7 @@ void rasterizeTriangle(ColorImageR8G8B8 &result,
                     t1.x, t1.y, 1.0f,
                     t2.x, t2.y, 1.0f, (float)x, (float)y, &b0, &b1, &b2)) {
                     vec3uc val = c0*b0 + c1*b1 + c2*b2;
-                    if (truncated)
+                    if (ismask)
                         result(x, y) = int(val > 0) * 255;
                     else
                         result(x, y) = val;
@@ -157,6 +157,7 @@ void Warp (
     dims = { orgRGB.getWidth(), orgRGB.getHeight() };
     warpField = new std::vector<float2>(dims[0]*dims[1]);
 
+    // Converting flow field to warp field, by adding the grid index
     int n = dims[0] * 2;
     for (unsigned int y = 0; y < dims[1]; y++)
         for (unsigned int x = 0; x < dims[0]; x++) {
@@ -228,11 +229,11 @@ void Warp (
 void ReadFlowFile(std::vector<float>*& img, const char* inp_imgPath)
 {
     if (inp_imgPath == NULL)
-	    printf("ReadFlowFile: empty inp_imgPath");
+        printf("ReadFlowFile: empty inp_imgPath");
 
     const char *dot = strrchr(inp_imgPath, '.');
     if (strcmp(dot, ".flo") != 0)
-	    printf("ReadFlowFile (%s): extension .flo expected", inp_imgPath);
+        printf("ReadFlowFile (%s): extension .flo expected", inp_imgPath);
 
     FILE *stream = fopen(inp_imgPath, "rb");
     if (stream == 0)
@@ -242,33 +243,33 @@ void ReadFlowFile(std::vector<float>*& img, const char* inp_imgPath)
     float tag;
 
     if ((int)fread(&tag,    sizeof(float), 1, stream) != 1 ||
-	(int)fread(&width,  sizeof(int),   1, stream) != 1 ||
-	(int)fread(&height, sizeof(int),   1, stream) != 1)
-	    printf("ReadFlowFile: problem reading file %s", inp_imgPath);
+    (int)fread(&width,  sizeof(int),   1, stream) != 1 ||
+    (int)fread(&height, sizeof(int),   1, stream) != 1)
+        printf("ReadFlowFile: problem reading file %s", inp_imgPath);
 
     if (tag != TAG_FLOAT) // simple test for correct endian-ness
-	printf("ReadFlowFile(%s): wrong tag (possibly due to big-endian machine?)", inp_imgPath);
+    printf("ReadFlowFile(%s): wrong tag (possibly due to big-endian machine?)", inp_imgPath);
 
     // another sanity check to see that integers were read correctly (99999 should do the trick...)
     if (width < 1 || width > 99999)
-	    printf("ReadFlowFile(%s): illegal width %d", inp_imgPath, width);
+        printf("ReadFlowFile(%s): illegal width %d", inp_imgPath, width);
 
     if (height < 1 || height > 99999)
-	    printf("ReadFlowFile(%s): illegal height %d", inp_imgPath, height);
+        printf("ReadFlowFile(%s): illegal height %d", inp_imgPath, height);
 
     int nBands = 2;
     img = new std::vector<float>(width * height * 2);
 
     int n = nBands * width;
-	float* ptr = &(*img)[0]; //&(*img)[y*n]; //.Pixel(0, y, 0);
+    float* ptr = &(*img)[0]; //&(*img)[y*n]; //.Pixel(0, y, 0);
     for (int y = 0; y < height; y++) {
-	    if ((int)fread(ptr, sizeof(float), n, stream) != n)
-	        printf("ReadFlowFile(%s): file is too short", inp_imgPath);
+        if ((int)fread(ptr, sizeof(float), n, stream) != n)
+            printf("ReadFlowFile(%s): file is too short", inp_imgPath);
         ptr += n;
     }
 
     if (fgetc(stream) != EOF)
-	    printf("ReadFlowFile(%s): file is too long", inp_imgPath);
+        printf("ReadFlowFile(%s): file is too long", inp_imgPath);
 
     fclose(stream);
 }
@@ -284,14 +285,14 @@ void WriteFlowFile(std::vector<float2>* img, const char* inp_imgPath, int width,
     // write the header
     fprintf(stream, TAG_STRING);
     if ((int)fwrite(&width,  sizeof(int),   1, stream) != 1 ||
-	(int)fwrite(&height, sizeof(int),   1, stream) != 1)
+    (int)fwrite(&height, sizeof(int),   1, stream) != 1)
         printf ("WriteFlowFile(%s): problem writing header\n", inp_imgPath); 
 
     // write the rows
     int n = width;
-	float2* ptr = &(*img)[0];
+    float2* ptr = &(*img)[0];
     for (int y = 0; y < height; y++) {
-	    if ((int)fwrite(ptr, sizeof(float), n, stream) != n)
+        if ((int)fwrite(ptr, sizeof(float), n, stream) != n)
             printf("WriteFlowFile(%s): problem writing data", inp_imgPath); 
         ptr += n;
    }
@@ -325,12 +326,12 @@ int main(int argc, const char * argv[]) {
     ColorImageR8G8B8 warpedRGB;
     ColorImageR8G8B8 warpedMask;
 
-	Warp(orgRGB, orgMask, flowImg, warpedRGB, warpedMask);
+    Warp(orgRGB, orgMask, flowImg, warpedRGB, warpedMask);
 
     LodePNG::save(warpedRGB, out_warpedImgPath);
-	LodePNG::save(warpedMask, out_warpedSegPath);
+    LodePNG::save(warpedMask, out_warpedSegPath);
 
     printf("Saved\n");
 
-	return 0;
+    return 0;
 }

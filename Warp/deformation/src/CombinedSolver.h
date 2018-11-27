@@ -101,12 +101,13 @@ class CombinedSolver : public CombinedSolverBase {
 public:
     CombinedSolver(const ColorImageR8G8B8& imageColor,
             const ColorImageR8G8B8& imageMask,
-            std::vector<std::vector<int>>& constraints,
-            CombinedSolverParameters params) : m_constraints(constraints) {
+            std::vector<std::vector<int>> constraints,
+            CombinedSolverParameters params) {
 
         m_orgRGB = imageColor;
         m_orgMask = imageMask;
         m_combinedSolverParameters = params;
+        m_constraints = constraints;
 
         m_dims = {  (unsigned int) m_orgRGB.getWidth(),
                     (unsigned int) m_orgRGB.getHeight() };
@@ -328,6 +329,6 @@ private:
     std::shared_ptr<OptImage> m_mask;
 
 
-    std::vector<std::vector<int>>& m_constraints;
+    std::vector<std::vector<int>> m_constraints;
 
 };

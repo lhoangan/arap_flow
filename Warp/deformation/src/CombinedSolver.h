@@ -99,6 +99,18 @@ float *wt0, float *wt1, float *wt2) {
 
 class CombinedSolver : public CombinedSolverBase {
 public:
+    CombinedSolver(CombinedSolverParameters params): m_dims() {
+        m_combinedSolverParameters = params;
+    }
+    CombinedSolver( unsigned int width, unsigned int height,
+            CombinedSolverParameters params) {
+
+        m_dims = { width, height };
+        m_combinedSolverParameters = params;
+
+        addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
+    }
+
     CombinedSolver(const ColorImageR8G8B8& imageColor,
             const ColorImageR8G8B8& imageMask,
             std::vector<std::vector<int>> constraints,
@@ -109,8 +121,30 @@ public:
         m_combinedSolverParameters = params;
         m_constraints = constraints;
 
+        m_urshape           = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);
+        m_warpField         = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);
+        m_warpAngles        = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 1, OptImage::GPU, true);
+        m_constraintImage   = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);
+        m_mask              = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 1, OptImage::GPU, true);
+
+        resetGPU();
+
         m_dims = {  (unsigned int) m_orgRGB.getWidth(),
                     (unsigned int) m_orgRGB.getHeight() };
+
+        addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
+    }
+
+ 
+    void addImage(const ColorImageR8G8B8& imageColor,
+            const ColorImageR8G8B8& imageMask,
+            std::vector<std::vector<int>> constraints,
+            CombinedSolverParameters params) {
+
+        m_orgRGB = imageColor;
+        m_orgMask = imageMask;
+        m_combinedSolverParameters = params;
+        m_constraints = constraints;
 
         m_urshape           = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);
         m_warpField         = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);
@@ -120,9 +154,13 @@ public:
 
         resetGPU();
 
-        addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
-    }
+        if (m_dims[0] != m_orgRGB.getWidth() || m_dims[1] != m_orgRGB.getHeight()) {
 
+            m_dims = {  (unsigned int) m_orgRGB.getWidth(),
+                        (unsigned int) m_orgRGB.getHeight() };
+            addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
+        }
+    }
 
     virtual void combinedSolveInit() override {
         float weightFit = 100.0f;

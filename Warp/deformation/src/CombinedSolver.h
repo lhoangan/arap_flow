@@ -148,8 +148,8 @@ public:
 
         if (m_dims[0] != m_orgRGB.getWidth() || m_dims[1] != m_orgRGB.getHeight()) {
 
-            printf("Warning: Input image has different size to the prebuilt plan.\n"
-                    "To avoid re-building plan and save time, put images of the "
+            printf("Warning: Input image has different size to one in the prebuilt plan.\n"
+                    "To avoid re-building the plan and to save time, put images of the "
                     "same size in the same list.\nStarting to re-build plan...\n");
 
             if (m_solverInfo.size() > 0)

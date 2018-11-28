@@ -10,6 +10,19 @@ struct inputPaths {
     std::string out_mskPath;
 };
 
+void usage() {
+#define p(msg)  printf(msg "\n");
+    p("Usage:");
+    p("./warp_image image mask constraints flow warped_image warped_mask");
+    p("Mask and warp image using the provided optical flow field.")
+    p("\timage: path to image with png extension")
+    p("\tmask: path to mask image with png extension, 0 for object, 1 for background")
+    p("\tconstraints: path to list of constraints, text file")
+    p("\tflo: path to optical flow image with flo extension")
+    p("\twarped_image: path to output warped image (.png), all intermediate directories must exist")
+    p("\twarped_mask: path to output warped mask (.png), all intermediate directories must exist")
+}
+
 static
 void loadConstraints(
         std::vector<std::vector<int> >& constraints,
@@ -121,7 +134,6 @@ void loadData(inputPaths paths_1frame,
                 std::vector<int> v; v.push_back(x); v.push_back(y); v.push_back(x); v.push_back(y);
                 constraints.push_back(v);
             }
-
     return ;
 }
 
@@ -149,13 +161,6 @@ void deformSingle(
 
 int main(int argc, const char * argv[]) {
 
-    std::string inp_imgPath;
-    std::string inp_mskPath;
-    std::string inp_cstrPath;
-    std::string out_floPath;
-    std::string out_imgPath;
-    std::string out_mskPath;
-
     std::vector<inputPaths> lines;
     inputPaths paths_1frame;
 
@@ -170,7 +175,7 @@ int main(int argc, const char * argv[]) {
 
         lines.push_back(paths_1frame);
     }
-    else if (argc == 1) {
+    else if (argc == 2) {
         std::ifstream infile(argv[1]);
         std::string line;
         while (getline(infile, line)) {
@@ -185,7 +190,8 @@ int main(int argc, const char * argv[]) {
         }
     }
     else {
-        printf("Invalid Input!");
+        printf("Invalid Input!\n");
+        usage();
         return 1;
     }
 
@@ -216,6 +222,7 @@ int main(int argc, const char * argv[]) {
     deformSingle(lines[0], orgRGB, orgMask, constraints, solver, params);
 
     for (int i=1; i < len; ++i) {
+        constraints.clear();
         loadData(lines[i], orgRGB, orgMask, constraints);
         deformSingle(lines[i], orgRGB, orgMask, constraints, solver, params);
     }

@@ -2,8 +2,7 @@
 
 #include <cuda_runtime.h>
 
-void usage()
-{
+void usage() {
 #define p(msg)  printf(msg "\n");
     p("Usage:");
     p("./warp_image image mask flow warped_image warped_mask");

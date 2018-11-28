@@ -146,6 +146,19 @@ public:
         m_combinedSolverParameters = params;
         m_constraints = constraints;
 
+        if (m_dims[0] != m_orgRGB.getWidth() || m_dims[1] != m_orgRGB.getHeight()) {
+
+            printf("Warning: Input image has different size to the prebuilt plan.\n"
+                    "To avoid re-building plan and save time, put images of the "
+                    "same size in the same list.\nStarting to re-build plan...\n");
+
+            if (m_solverInfo.size() > 0)
+                m_solverInfo.clear();
+            m_dims = {  (unsigned int) m_orgRGB.getWidth(),
+                        (unsigned int) m_orgRGB.getHeight() };
+            addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
+        }
+
         m_urshape           = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);
         m_warpField         = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);
         m_warpAngles        = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 1, OptImage::GPU, true);
@@ -154,12 +167,6 @@ public:
 
         resetGPU();
 
-        if (m_dims[0] != m_orgRGB.getWidth() || m_dims[1] != m_orgRGB.getHeight()) {
-
-            m_dims = {  (unsigned int) m_orgRGB.getWidth(),
-                        (unsigned int) m_orgRGB.getHeight() };
-            addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
-        }
     }
 
     virtual void combinedSolveInit() override {

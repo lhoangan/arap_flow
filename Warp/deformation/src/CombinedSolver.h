@@ -7,7 +7,6 @@
 
 #include "../../shared/CombinedSolverParameters.h"
 #include "../../shared/CombinedSolverBase.h"
-#include "Configure.h"
 #include <fstream>
 
 

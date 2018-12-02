@@ -1,5 +1,7 @@
 .*.swo
 .*.swp
+deepmatching_1.2.2.zip
+deepmatching_1.2.2_c++
 
 # Prerequisites
 *.d

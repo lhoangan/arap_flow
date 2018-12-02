@@ -6,6 +6,8 @@ Flow Datasets for Videos in the Wild"
 
 ## Pipeline
 
+## Datasets
+
 ## Citation
 
 If you find this implementation useful and have applied for your research, please
@@ -19,10 +21,13 @@ consider citing this paper
 }
 ```
 
-## Acknowledgement
+## Reference
+Please consider citing the following work if you are using this implementation.
 - ARAP image deformation is implemented using Opt: A Domain Specific Language 
-for Non-linear Least Squares Optimization in Graphics and Imaging,
-more detail at https://github.com/niessner/Opt
+for Non-linear Least Squares Optimization in Graphics and Imaging, given as
+example at https://github.com/niessner/Opt
+- DeepMatching is developed by THOTH, INRIA, more detail at
+https://thoth.inrialpes.fr/src/deepmatching/
 - C++ flo IO is adapted from Middleburry implementation at
 http://vision.middlebury.edu/flow/code/flow-code/flowIO.cpp
 - Python flo IO and visualization is adapted

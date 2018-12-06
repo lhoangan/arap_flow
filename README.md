@@ -17,7 +17,7 @@ consider citing this paper
   author = {Hoang-An Le and Tushar Nimbhorkar and Thomas Mensink and Sezer Karaoglu and Anil S. Baslamisli and Theo Gevers},
   title = {Unsupervised Generation of Optical Flow Datasets for Videos in the Wild},
   year = {2018},
-  eprint = {arXiv:1811.12373}
+  eprint = {arXiv:1812.01946}
 }
 ```
 

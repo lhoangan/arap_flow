@@ -4,6 +4,41 @@ Flow Datasets for Videos in the Wild"
 
 ## Installation
 
+### Opt
+https://github.com/niessner/Opt/blob/master/README.md
+
+CUDA 7.5
+
+#### With anaconda
+
+v3.8.1
+conda install -c statiskit clang
+
+for CUDA higher than 7.5 (tested with 9.0)
+use the newest version of terra
+(terra release)[https://github.com/zdevito/terra/releases]
+
+tested with anaconda clang 3.8.1, (here)[https://anaconda.org/statiskit/clang]
+`conda install -c statiskit clang `
+
+(LLVM release)[http://releases.llvm.org/download.html]
+Update environmental variable $PATH, $LD_LIBRARY_PATH, and $INCLUDE_PATH
+LLVM 5.0.0
+
+LLVM 6.0.0
+
+LLVM 7.0.0, (here)[https://anaconda.org/conda-forge/clang]
+`conda install -c conda-forge/label/gcc7 clang`
+
+
+for non-standard CUDA directories, update $CUDA_HOME (for Linux) and $CUDA_PATH (for Windows)
+
+insert flag `-ltinfo` alongside each instance of `-lpthread` or `-pthread`
+maybe install libtinfo if necessary. Refered from (here)[https://github.com/halide/Halide/issues/1112]
+
+
+
+
 ## Pipeline
 
 ## Datasets

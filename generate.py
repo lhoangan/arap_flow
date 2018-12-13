@@ -165,7 +165,7 @@ def run_matching(img1, img2, msk1, msk2, out_file):
         if sqrt((x2-x1)**2 + (y2-y1)**2) < 60 and msk1[y1, x1] == msk2[y2, x2]:
             cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
     # write back to file
-    open(out_file, 'w').write('\n'.join(cstrs))
+    open(out_file, 'w').write('\n'.join([str(len(cstrs))] + cstrs))
     elapsed = time.time() - begin
     return elapsed
 

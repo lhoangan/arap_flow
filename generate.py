@@ -44,8 +44,59 @@ import flow
 exp_num = '002-trial-10Lseg-seg.2'
 #== ==========================================================================
 
-def add_bg():
-    pass
+def fit_bg(bg, im):
+    if bg.shape[0] <= im.shape[0] or bg.shape[1] <= im.shape[1]:
+        hmax = max(bg.shape[0], im.shape[0])
+        wmax = max(bg.shape[1], im.shape[1])
+        ratio = max(float(hmax)/bg.shape[0], float(wmax)/bg.shape[1])
+        ratio *= rn.uniform(1, 2) # scale the ratio a little larger
+        bgim = Image.fromarray(bg)
+        bgim = bgim.resize((int(bg.shape[0] * ratio), int(bg.shape[1] * ratio)),
+                Image.ANTIALIAS)
+        bg = np.array(bgim)
+    # random crop the background to the image
+    h, w, _ = im.shape
+    sy, sx = rn.randint(0, bg.shape[0] - h), rn.randint(0, bg.shape[1] - w)
+    return bg[sy:(sy+h), sx:(sx+w), :]
+
+def add_bg(bg_dir, rgb_root, mask_root, rgb_out, bg=0):
+
+    # get list of all background
+    bg_paths = []
+    for root, _, files in os.walk(bg_dir):
+        for f in files:
+            try:
+                im = np.array(Image.open(osp.join(root, f)))
+                if im.shape[2] == 3:
+                    bg_paths.append(osp.join(root, f))
+            except:
+                continue
+    tmp_paths = []
+    for root, _, files in os.walk(rgb_root):
+        for f in files:
+            if '.PNG' not in f.upper():
+                continue
+            p = root.replace(rgb_root, '').strip(osp.sep) # strip form the slashes
+            im = np.array(Image.open(osp.join(rgb_root, p, f)))
+            mk = np.array(Image.open(osp.join(mask_root, p, f)))
+            # load background
+            if len(tmp_paths) == 0:
+                tmp_paths = bg_paths[:]
+            bgpath = rn.choice(tmp_paths)
+            tmp_paths.remove(bgpath)
+            bgim = np.array(Image.open(bgpath))
+            bgim = fit_bg(bgim, im)
+            # add background
+            assert bgim.shape == im.shape, 'Sizes mismatch background and image'+\
+                    str(bgim.shape) + ' vs. ' + str(im.shape)
+            ou = im.copy()
+            idx = mk==bg
+            ou[idx] = bgim[idx]
+            outpath = osp.join(rgb_out, p, f)
+            if not osp.isdir(osp.dirname(outpath)):
+                os.makedirs(osp.dirname(outpath))
+            Image.fromarray(ou).save(outpath)
+
 
 
 def run_arap(path, progress):
@@ -97,10 +148,9 @@ def prepare_arap(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
         open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths[key]))
         files.append(osp.abspath('tmp/{}.txt'.format(fn)))
 
-    num_cores = int(multiprocessing.cpu_count() / 2)
+    num_cores = int(multiprocessing.cpu_count() / 2) # TODO gpu capcity
     n = float(len(paths.keys()))
-    #Parallel(n_jobs=num_cores)(delayed(run_arap)(p, i/n) for i, p in enumerate(files))
-    run_arap(files[0], 100)
+    Parallel(n_jobs=num_cores)(delayed(run_arap)(p, i/n) for i, p in enumerate(files))
 
 def convert_rgb(jpg_root, png_root):
     for root, _, files in os.walk(jpg_root):
@@ -188,17 +238,22 @@ def prepare_matching(fd, rgb_root, msk_root, cst_root):
                             osp.join(cst_root, d, osp.splitext(f)[0]+'.txt'))
 
 def main(flags):
-    prepare_matching(1, osp.join(input_root, orgcolor), osp.join(input_root, orgmask),
-            osp.join(output_root, constraints_dir))
-    # TODO check if input images are jpg and convert to png
-    convert_rgb(osp.join(input_root, orgcolor), osp.join(input_root, color_dir))
-    convert_mask(osp.join(input_root, orgmask), osp.join(input_root, mask_dir))
-    prepare_arap(osp.join(input_root, color_dir),
+    add_bg('/home/hale/TrimBot/projects/flickr_downloader/tt',
+            osp.join(input_root, color_dir),
             osp.join(input_root, mask_dir),
-            osp.join(output_root, constraints_dir),
-            osp.join(output_root, flow_dir),
-            osp.join(output_root, wrgb_dir),
-            osp.join(output_root, wMask_dir))
+            osp.join(output_root, color_dir), bg=255)
+
+    #prepare_matching(1, osp.join(input_root, orgcolor), osp.join(input_root, orgmask),
+    #        osp.join(output_root, constraints_dir))
+    ## TODO check if input images are jpg and convert to png
+    #convert_rgb(osp.join(input_root, orgcolor), osp.join(input_root, color_dir))
+    #convert_mask(osp.join(input_root, orgmask), osp.join(input_root, mask_dir))
+    #prepare_arap(osp.join(input_root, color_dir),
+    #        osp.join(input_root, mask_dir),
+    #        osp.join(output_root, constraints_dir),
+    #        osp.join(output_root, flow_dir),
+    #        osp.join(output_root, wrgb_dir),
+    #        osp.join(output_root, wMask_dir))
 
 
 if __name__ == "__main__":

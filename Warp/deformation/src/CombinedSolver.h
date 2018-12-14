@@ -98,22 +98,23 @@ float *wt0, float *wt1, float *wt2) {
 
 class CombinedSolver : public CombinedSolverBase {
 public:
-    CombinedSolver(CombinedSolverParameters params): m_dims() {
+    CombinedSolver(const char *planPath, CombinedSolverParameters params): 
+        m_dims(), m_planPath(planPath) {
         m_combinedSolverParameters = params;
     }
-    CombinedSolver( unsigned int width, unsigned int height,
-            CombinedSolverParameters params) {
+    CombinedSolver( unsigned int width, unsigned int height, const char *planPath,
+            CombinedSolverParameters params): m_planPath(planPath) {
 
         m_dims = { width, height };
         m_combinedSolverParameters = params;
 
-        addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
+        addOptSolvers(m_dims, m_planPath, m_combinedSolverParameters.optDoublePrecision);
     }
 
     CombinedSolver(const ColorImageR8G8B8& imageColor,
             const ColorImageR8G8B8& imageMask,
-            std::vector<std::vector<int>> constraints,
-            CombinedSolverParameters params) {
+            std::vector<std::vector<int>> constraints, const char *planPath,
+            CombinedSolverParameters params): m_planPath(planPath) {
 
         m_orgRGB = imageColor;
         m_orgMask = imageMask;
@@ -131,7 +132,7 @@ public:
         m_dims = {  (unsigned int) m_orgRGB.getWidth(),
                     (unsigned int) m_orgRGB.getHeight() };
 
-        addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
+        addOptSolvers(m_dims, m_planPath, m_combinedSolverParameters.optDoublePrecision);
     }
 
  
@@ -355,6 +356,7 @@ public:
     }
 
 private:
+    const char *m_planPath;
     ColorImageR8G8B8 m_orgRGB;
     ColorImageR8G8B8 m_orgMask;
 

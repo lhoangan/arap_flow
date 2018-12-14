@@ -164,6 +164,8 @@ int main(int argc, const char * argv[]) {
     std::vector<inputPaths> lines;
     inputPaths paths_1frame;
 
+    // Read command line arguments
+    // receive all the relevant paths for 1 frame and run once
     if (argc == 7) {
 
         paths_1frame.inp_imgPath = argv[1];
@@ -175,7 +177,7 @@ int main(int argc, const char * argv[]) {
 
         lines.push_back(paths_1frame);
     }
-    else if (argc == 2) {
+    else if (argc == 2) { // receive a path to list file for multiple frames
         std::ifstream infile(argv[1]);
         std::string line;
         while (getline(infile, line)) {
@@ -195,10 +197,18 @@ int main(int argc, const char * argv[]) {
         return 1;
     }
 
+    // sanity check
     unsigned int len = static_cast<unsigned int>(lines.size());
-
     if (len == 0) {
         printf("No file to be processed");
+        return 1;
+    }
+    const char *planPath = getenv("ARAP_PLAN") == NULL ? "arap_plan.t" : getenv("ARAP_PLAN");
+    printf("Optimization plan at %s\n", planPath);
+    std::ifstream f(planPath);
+    if (!f.good()) {
+        printf (" Not found! Please run export ARAP_PLAN=/path/to/plan.t or copy"
+                "the file to the running folder with name arap_plan.t");
         return 1;
     }
 
@@ -218,7 +228,7 @@ int main(int argc, const char * argv[]) {
     unsigned int width = orgRGB.getWidth();
     unsigned int height = orgRGB.getHeight();
 
-    CombinedSolver solver(width, height, params);
+    CombinedSolver solver(width, height, planPath, params);
     deformSingle(lines[0], orgRGB, orgMask, constraints, solver, params);
 
     for (int i=1; i < len; ++i) {

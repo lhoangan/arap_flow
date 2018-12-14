@@ -10,25 +10,25 @@ from subprocess import call
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 
-arap_bin = '/home/hale/TrimBot/projects/ARAP_flow/Warp/deformation/image_warping'
+arap_bin = '/home/hale/TrimBot/projects/ARAP_flow/Warp/deformation'
 dm_bin = 'deepmatching/deepmatching_1.2.2_c++/deepmatching-static'
 
 input_root = 'data/DAVIS/'
 output_root = 'data/DAVIS/fd1'
 background_dir = '..'
 
-orgcolor = 'oRGB'
-orgmask = 'oMasks'
-color_dir = 'inRGB'
-mask_dir = 'inMasks'
-constraints_dir = 'inCnstr'
+orgcolor = 'orgRGB'
+orgmask = 'orgMasks'
+color_dir = 'inpRGB'
+mask_dir = 'inpMasks'
+constraints_dir = 'tmpCnstr'
 
 tmp_color_dir = '..' # convert from JPG to PNG if needed
 tmp_mask_dir = '..'
 
-flo_dir = '..'
-wRGB_dir = '..'
-wMask_dir = '..'
+flow_dir = 'Flow'
+wrgb_dir = 'wRGB'
+wMask_dir = 'wMasks'
 
 frame_distance = 1
 
@@ -44,12 +44,16 @@ import flow
 exp_num = '002-trial-10Lseg-seg.2'
 #== ==========================================================================
 
+def add_bg():
+    pass
+
 
 def run_arap(path, progress):
-    cmd = 'cd {} ; ./image_warping {:s}'.format(arap_bin, path)
+    current_path = os.getcwd()
+    cmd = 'cd {} ; ./image_warping {:s} ; cd {}'.format(arap_bin, path, current_path)
 
     begin = time.time()
-    status = call(cmd) #, shell=True)
+    status = call(cmd, shell=True)
     assert status == 0, \
         'ARAP exited with code {:d}. The command was \n{}'.format(status, cmd)
     print '[{:.2f}% ] | Elapsed {:.3f}s'.format(progress*100, time.time() - begin)
@@ -58,35 +62,29 @@ def run_arap(path, progress):
 def prepare_arap(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
 
     paths = dict()
-    for root, dirs, files in os.walk(rgb_root):
+    # scan by constraints files since rgb_root contains more file than there really is
+    scan_root = cst_root
+    for root, dirs, files in os.walk(scan_root):
         for f in files:
-            if '.png' not in f:
+            if '.txt' not in f:
                 continue
-            p = root.replace(rgb_root, '')
-            s = os.dirname(p)
-            paths[s] = paths.get(s, [])
-            path = {}
-            ft = f.replace('.png','.txt') # filename for text
-            ff = f.replace('.png','.flo') # filename for flow
-            path['rgb'] = osp.join(rgb_root, p, f)
-            path['msk'] = osp.join(msk_root, p, f)
-            path['cst'] = osp.join(cst_root, p, ft)
-            path['flo'] = osp.join(flo_root, p, ff)
-            path['wco'] = osp.join(wco_root, p, f)
-            path['wmk'] = osp.join(wmk_root, p, f)
+            seq = root.replace(scan_root, '').strip(osp.sep) # strip form the slashes
+            paths[seq] = paths.get(seq, [])
+            fi = f.replace('.txt','.png') # filename for img
+            ff = f.replace('.txt','.flo') # filename for flow
 
-            assert osp.exists(path['rgb']), 'File not found:\n{}'.format(path['rgb'])
-            assert osp.exists(path['msk']), 'File not found:\n{}'.format(path['msk'])
-            assert osp.exists(path['cst']), 'File not found:\n{}'.format(path['cst'])
-
-            if not osp.isdir(osp.dirname(path['flo'])):
-                os.makedirs(osp.dirname(path['flo']))
-            if not osp.isdir(osp.dirname(path['wco'])):
-                os.makedirs(osp.dirname(path['wco']))
-            if not osp.isdir(osp.dirname(path['wmk'])):
-                os.makedirs(osp.dirname(path['wmk']))
-
-            paths[s].append(path)
+            line = '{} {} {} {} {} {}'.format(  osp.join(rgb_root, seq, fi),
+                                                osp.join(msk_root, seq, fi),
+                                                osp.join(cst_root, seq, f),
+                                                osp.join(flo_root, seq, ff),
+                                                osp.join(wco_root, seq, fi),
+                                                osp.join(wmk_root, seq, fi))
+            for p in line.split(' ')[:2]:
+                assert osp.exists(p), 'File not found:\n{}'.format(p)
+            for p in line.split(' ')[3:]:
+                if not osp.isdir(osp.dirname(p)):
+                    os.makedirs(osp.dirname(p))
+            paths[seq].append(line)
 
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
@@ -94,34 +92,27 @@ def prepare_arap(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
     files = []
     # create temporary list files
     for key in paths:
-        params_all = []
-        path = paths[key]
-        params_one = '{} {} {} {} {} {}'.format(osp.join(path['rgb']),
-                                                osp.join(path['msk']),
-                                                osp.join(path['cst']),
-                                                osp.join(path['flo']),
-                                                osp.join(path['wco']),
-                                                osp.join(path['wmk']))
-        params_all.append(params_one)
         # TODO use try and finally to clean the temporary files
         fn = key.replace('/', '_')
-        open('tmp/{}.png'.format(fn), 'w').write('\n'.join(params_all))
-        files.append(osp.abspath('tmp/{}.png'.format(fn)))
+        # TODO tmp folder
+        open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths[key]))
+        files.append(osp.abspath('tmp/{}.txt'.format(fn)))
 
     num_cores = int(multiprocessing.cpu_count() / 2)
     n = float(len(paths.keys()))
-    Parallel(n_jobs=num_cores)(delayed(run_arap)(p, i/n) for i, p in enumerate(files))
+    #Parallel(n_jobs=num_cores)(delayed(run_arap)(p, i/n) for i, p in enumerate(files))
+    run_arap(files[0], 100)
 
 def convert_rgb(jpg_root, png_root):
     for root, _, files in os.walk(jpg_root):
         for f in files:
-            if '.JPG' not in f.upper() or '.JPEG' not in f.upper():
+            if '.JPG' not in f.upper() and '.JPEG' not in f.upper():
                 continue
             im = Image.open(osp.join(root, f))
             outdir = root.replace(jpg_root, png_root)
             if not osp.isdir(outdir):
                 os.makedirs(outdir)
-            im.save(osp.join(outdir, osp.splitext(f)+'.png'))
+            im.save(osp.join(outdir, osp.splitext(f)[0]+'.png'))
 
 def convert_mask(inp_root, out_root, flag=None):
     """
@@ -136,7 +127,7 @@ def convert_mask(inp_root, out_root, flag=None):
                 os.makedirs(outdir)
             mask = np.zeros_like(im, dtype=np.uint8)
             mask[im==0] = 255 # TODO mask with each object segment separately
-            Image.fromarray(mask).save(osp.join(out_root, osp.splitext(f)+'.png'))
+            Image.fromarray(mask).save(osp.join(outdir, osp.splitext(f)[0]+'.png'))
 
 # TODO: have a mechanism to input constraints from file and not run again
 def run_matching(img1, img2, msk1, msk2, out_file):
@@ -171,7 +162,6 @@ def run_matching(img1, img2, msk1, msk2, out_file):
 
 def prepare_matching(fd, rgb_root, msk_root, cst_root):
 
-
     # TODO have the file pattern input from argument
     reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
     for root, dirs, _ in os.walk(rgb_root):
@@ -197,17 +187,31 @@ def prepare_matching(fd, rgb_root, msk_root, cst_root):
                             osp.join(msk_root, d, osp.splitext(f)[0]+'.png'),
                             osp.join(msk_root, d, osp.splitext(f2)[0]+'.png'),
                             osp.join(cst_root, d, osp.splitext(f)[0]+'.txt'))
-def add_bg():
-    pass
 
-def main():
+def main(flags):
     prepare_matching(1, osp.join(input_root, orgcolor), osp.join(input_root, orgmask),
             osp.join(output_root, constraints_dir))
+    # TODO check if input images are jpg and convert to png
+    convert_rgb(osp.join(input_root, orgcolor), osp.join(input_root, color_dir))
+    convert_mask(osp.join(input_root, orgmask), osp.join(input_root, mask_dir))
+    prepare_arap(osp.join(input_root, color_dir),
+            osp.join(input_root, mask_dir),
+            osp.join(output_root, constraints_dir),
+            osp.join(output_root, flow_dir),
+            osp.join(output_root, wrgb_dir),
+            osp.join(output_root, wMask_dir))
 
 
 if __name__ == "__main__":
     # TODO check if rgb and mask images are in png format, if not convert them to png
-    main()
+    # TODO input if want to keep constraints and warped mask
+    parser = argparse.ArgumentParser(description='Argument for ARAP flow generation')
+    parser.add_argument('--rm-cnstr')
+    parser.add_argument('--rm-wmask')
+    parser.add_argument('--rm-tmp-cmd')
+    parser.add_argument('--img-pattern')
+    flags = parser.parse_args()
+    main(flags)
 
 '''
 #def make_cmd(path, fname,fseg,fmask1,fcons,fwarp,flow_dir, cmd='image_warping'):

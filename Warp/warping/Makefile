@@ -10,9 +10,9 @@ ifeq ($(UNAME), Linux)
   S4 = 64
 endif
 
-FLAGS += -O3 -g -std=c++11 -I$(SRC) -I$(SRC)/cutil/inc -I../API/release/include -I$(CUDAHOME)/include -I../external/mLib/include
+FLAGS += -O3 -g -std=c++11 -I$(SRC) -I$(SRC)/cutil/inc -I../API/release/include -I$(CUDAHOME)/include -I${CUDA_HOME}/include -I../external/mLib/include
 NVCCFLAGS += -arch sm_30 $(FLAGS)
-LFLAGS += -std=c++11 -L$(CUDAHOME)/lib$(S4) -lcudart -ldl
+LFLAGS += -std=c++11 -L$(CUDAHOME)/lib$(S4) -L${CUDA_HOME}/lib$(S4) -lcudart -ldl
 UNAME := $(shell uname)
 
 ifeq ($(UNAME), Darwin)
@@ -20,7 +20,7 @@ ifeq ($(UNAME), Darwin)
 endif
 
 ifeq ($(UNAME), Linux)
-  LFLAGS += -Wl,-rpath,$(CUDAHOME)/lib$(S4) -pthread
+  LFLAGS += -Wl,-rpath,$(CUDAHOME)/lib$(S4) -Wl,-rpath,${CUDA_HOME}/lib$(S4) -pthread -ltinfo
   S4 = 64
 endif
 

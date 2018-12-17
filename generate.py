@@ -32,6 +32,8 @@ wMask_dir = 'wMasks'
 
 frame_distance = 1
 
+ARAP_BG = 255
+
 # if constraints ava
 
 
@@ -40,29 +42,37 @@ import sintel_io
 sys.path.insert(0, '/home/hale/TrimBot/projects/myutils/')
 import flow
 
-# experiment setups
-exp_num = '002-trial-10Lseg-seg.2'
 #== ==========================================================================
 
 def fit_bg(bg, im):
-    if bg.shape[0] <= im.shape[0] or bg.shape[1] <= im.shape[1]:
-        hmax = max(bg.shape[0], im.shape[0])
-        wmax = max(bg.shape[1], im.shape[1])
-        ratio = max(float(hmax)/bg.shape[0], float(wmax)/bg.shape[1])
-        ratio *= rn.uniform(1, 2) # scale the ratio a little larger
-        bgim = Image.fromarray(bg)
-        bgim = bgim.resize((int(bg.shape[0] * ratio), int(bg.shape[1] * ratio)),
-                Image.ANTIALIAS)
-        bg = np.array(bgim)
-    # random crop the background to the image
-    h, w, _ = im.shape
-    sy, sx = rn.randint(0, bg.shape[0] - h), rn.randint(0, bg.shape[1] - w)
-    return bg[sy:(sy+h), sx:(sx+w), :]
+    imh, imw, _ = im.shape
+    bgh, bgw, _ = bg.shape
+    bgim = Image.fromarray(bg)
 
-def add_bg(bg_dir, rgb_root, mask_root, rgb_out, bg=0):
+    hmax = max(bgh, imh)
+    wmax = max(bgw, imw)
+    r = rn.uniform(1, 2) * max(float(hmax)/bgh, float(wmax)/bgw)
+    bgim = bgim.resize((int(bgw*r), int(bgh*r)), Image.ANTIALIAS)
+    bg = np.array(bgim)
+    # random crop the background to the image
+    sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
+    return bg[sy:(sy+imh), sx:(sx+imw), :]
+
+def add_bg(im, mk, bgim, bgval):
+    assert mk.shape == im.shape[:-1], 'Sizes mismatch mask and image '+\
+            str(mk.shape) + ' vs. ' + str(im.shape[:-1])
+    assert bgim.shape == im.shape, 'Sizes mismatch background and image '+\
+            str(bgim.shape) + ' vs. ' + str(im.shape)
+    out = im.copy()
+    idx = mk==bgval
+    out[idx] = bgim[idx]
+    return out
+
+def bg_gen(bg_dir, im1dict, im2dict):
 
     # get list of all background
     bg_paths = []
+    print "Scanning background directory... ",
     for root, _, files in os.walk(bg_dir):
         for f in files:
             try:
@@ -71,31 +81,50 @@ def add_bg(bg_dir, rgb_root, mask_root, rgb_out, bg=0):
                     bg_paths.append(osp.join(root, f))
             except:
                 continue
+    print "\t[Done]"
     tmp_paths = []
-    for root, _, files in os.walk(rgb_root):
+    # scan by im2dict because frame2 might contains fewer images than original
+    for root, _, files in os.walk(im2dict['rgb_root']):
         for f in files:
             if '.PNG' not in f.upper():
                 continue
-            p = root.replace(rgb_root, '').strip(osp.sep) # strip form the slashes
-            im = np.array(Image.open(osp.join(rgb_root, p, f)))
-            mk = np.array(Image.open(osp.join(mask_root, p, f)))
+            # strip form the slashes
+            p = root.replace(im2dict['rgb_root'], '').strip(osp.sep)
+
+            assert osp.exists(osp.join(im1dict['rgb_root'], p, f)),\
+                        'File not found ' + osp.join(im1dict['rgb_root'], p, f)
+            assert osp.exists(osp.join(im1dict['mask_root'], p, f)),\
+                        'File not found ' + osp.join(im1dict['mask_root'], p, f)
+            assert osp.exists(osp.join(im2dict['rgb_root'], p, f)),\
+                        'File not found ' + osp.join(im2dict['rgb_root'], p, f)
+            assert osp.exists(osp.join(im2dict['mask_root'], p, f)),\
+                        'File not found ' + osp.join(im2dict['mask_root'], p, f)
+
+            im1 = np.array(Image.open(osp.join(im1dict['rgb_root'], p, f)))
+            mk1 = np.array(Image.open(osp.join(im1dict['mask_root'], p, f)))
+            im2 = np.array(Image.open(osp.join(im2dict['rgb_root'], p, f)))
+            mk2 = np.array(Image.open(osp.join(im2dict['mask_root'], p, f)))
+
             # load background
             if len(tmp_paths) == 0:
-                tmp_paths = bg_paths[:]
+                tmp_paths = sorted(bg_paths[:])
             bgpath = rn.choice(tmp_paths)
             tmp_paths.remove(bgpath)
             bgim = np.array(Image.open(bgpath))
-            bgim = fit_bg(bgim, im)
+            bgim = fit_bg(bgim, im1)
+
             # add background
-            assert bgim.shape == im.shape, 'Sizes mismatch background and image'+\
-                    str(bgim.shape) + ' vs. ' + str(im.shape)
-            ou = im.copy()
-            idx = mk==bg
-            ou[idx] = bgim[idx]
-            outpath = osp.join(rgb_out, p, f)
-            if not osp.isdir(osp.dirname(outpath)):
-                os.makedirs(osp.dirname(outpath))
-            Image.fromarray(ou).save(outpath)
+            out1 = add_bg(im1, mk1, bgim, bgval=im1dict['bgval'])
+            outpath1 = osp.join(im1dict['rgb_out'], p, f)
+            if not osp.isdir(osp.dirname(outpath1)):
+                os.makedirs(osp.dirname(outpath1))
+            Image.fromarray(out1).save(outpath1)
+
+            out2 = add_bg(im2, mk2, bgim, bgval=im2dict['bgval'])
+            outpath2 = osp.join(im2dict['rgb_out'], p, f)
+            if not osp.isdir(osp.dirname(outpath2)):
+                os.makedirs(osp.dirname(outpath2))
+            Image.fromarray(out2).save(outpath2)
 
 
 
@@ -175,7 +204,7 @@ def convert_mask(inp_root, out_root, flag=None):
             if not osp.isdir(outdir):
                 os.makedirs(outdir)
             mask = np.zeros_like(im, dtype=np.uint8)
-            mask[im==0] = 255 # TODO mask with each object segment separately
+            mask[im==0] = ARAP_BG # TODO mask with each object segment separately
             Image.fromarray(mask).save(osp.join(outdir, osp.splitext(f)[0]+'.png'))
 
 # TODO: have a mechanism to input constraints from file and not run again
@@ -238,10 +267,19 @@ def prepare_matching(fd, rgb_root, msk_root, cst_root):
                             osp.join(cst_root, d, osp.splitext(f)[0]+'.txt'))
 
 def main(flags):
-    add_bg('/home/hale/TrimBot/projects/flickr_downloader/tt',
-            osp.join(input_root, color_dir),
-            osp.join(input_root, mask_dir),
-            osp.join(output_root, color_dir), bg=255)
+
+
+    im1dict = dict()
+    im1dict['rgb_root'] = osp.join(input_root, color_dir)
+    im1dict['mask_root'] = osp.join(input_root, mask_dir)
+    im1dict['rgb_out'] = osp.join(output_root, color_dir)
+    im1dict['bgval'] = ARAP_BG
+    im2dict = dict()
+    im2dict['rgb_root'] = osp.join(output_root, wrgb_dir)
+    im2dict['mask_root'] = osp.join(output_root, wMask_dir)
+    im2dict['rgb_out'] = osp.join(output_root, wrgb_dir)
+    im2dict['bgval'] = 0
+    bg_gen('/home/hale/TrimBot/projects/flickr_downloader/tt', im1dict, im2dict)
 
     #prepare_matching(1, osp.join(input_root, orgcolor), osp.join(input_root, orgmask),
     #        osp.join(output_root, constraints_dir))

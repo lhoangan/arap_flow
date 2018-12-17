@@ -15,16 +15,13 @@ dm_bin = 'deepmatching/deepmatching_1.2.2_c++/deepmatching-static'
 
 input_root = 'data/DAVIS/'
 output_root = 'data/DAVIS/fd1'
-background_dir = '..'
+bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/tt'
 
 orgcolor = 'orgRGB'
 orgmask = 'orgMasks'
 color_dir = 'inpRGB'
 mask_dir = 'inpMasks'
 constraints_dir = 'tmpCnstr'
-
-tmp_color_dir = '..' # convert from JPG to PNG if needed
-tmp_mask_dir = '..'
 
 flow_dir = 'Flow'
 wrgb_dir = 'wRGB'
@@ -34,15 +31,8 @@ frame_distance = 1
 
 ARAP_BG = 255
 
-# if constraints ava
 
-
-sys.path.insert(0, '/home/hale/Datasets/MPI-Sintel-seg/sdk/python')
-import sintel_io
-sys.path.insert(0, '/home/hale/TrimBot/projects/myutils/')
-import flow
-
-#== ==========================================================================
+#=============================================================================
 
 def fit_bg(bg, im):
     imh, imw, _ = im.shape
@@ -68,11 +58,12 @@ def add_bg(im, mk, bgim, bgval):
     out[idx] = bgim[idx]
     return out
 
-def bg_gen(bg_dir, im1dict, im2dict):
+def bg_gen(bg_dir, im1paths, im2paths, flow_root):
 
     # get list of all background
     bg_paths = []
     print "Scanning background directory... ",
+    begin = time.time()
     for root, _, files in os.walk(bg_dir):
         for f in files:
             try:
@@ -81,29 +72,36 @@ def bg_gen(bg_dir, im1dict, im2dict):
                     bg_paths.append(osp.join(root, f))
             except:
                 continue
-    print "\t[Done]"
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+
+    print "Adding backgrounds to frames...",
+    begin = time.time()
     tmp_paths = []
-    # scan by im2dict because frame2 might contains fewer images than original
-    for root, _, files in os.walk(im2dict['rgb_root']):
+    # scan by im2paths because frame2 might contains fewer images than original
+    lines = []
+    for root, _, files in os.walk(im2paths['rgb_root']):
         for f in files:
             if '.PNG' not in f.upper():
                 continue
             # strip form the slashes
-            p = root.replace(im2dict['rgb_root'], '').strip(osp.sep)
+            p = root.replace(im2paths['rgb_root'], '').strip(osp.sep)
+            ff = f.replace('.png', '.flo')
 
-            assert osp.exists(osp.join(im1dict['rgb_root'], p, f)),\
-                        'File not found ' + osp.join(im1dict['rgb_root'], p, f)
-            assert osp.exists(osp.join(im1dict['mask_root'], p, f)),\
-                        'File not found ' + osp.join(im1dict['mask_root'], p, f)
-            assert osp.exists(osp.join(im2dict['rgb_root'], p, f)),\
-                        'File not found ' + osp.join(im2dict['rgb_root'], p, f)
-            assert osp.exists(osp.join(im2dict['mask_root'], p, f)),\
-                        'File not found ' + osp.join(im2dict['mask_root'], p, f)
+            assert osp.exists(osp.join(im1paths['rgb_root'], p, f)),\
+                        'File not found ' + osp.join(im1paths['rgb_root'], p, f)
+            assert osp.exists(osp.join(im1paths['mask_root'], p, f)),\
+                        'File not found ' + osp.join(im1paths['mask_root'], p, f)
+            assert osp.exists(osp.join(im2paths['rgb_root'], p, f)),\
+                        'File not found ' + osp.join(im2paths['rgb_root'], p, f)
+            assert osp.exists(osp.join(im2paths['mask_root'], p, f)),\
+                        'File not found ' + osp.join(im2paths['mask_root'], p, f)
+            assert osp.exists(osp.join(flow_root, p, ff)),\
+                        'File not found ' + osp.join(flow_root, p, ff)
 
-            im1 = np.array(Image.open(osp.join(im1dict['rgb_root'], p, f)))
-            mk1 = np.array(Image.open(osp.join(im1dict['mask_root'], p, f)))
-            im2 = np.array(Image.open(osp.join(im2dict['rgb_root'], p, f)))
-            mk2 = np.array(Image.open(osp.join(im2dict['mask_root'], p, f)))
+            im1 = np.array(Image.open(osp.join(im1paths['rgb_root'], p, f)))
+            mk1 = np.array(Image.open(osp.join(im1paths['mask_root'], p, f)))
+            im2 = np.array(Image.open(osp.join(im2paths['rgb_root'], p, f)))
+            mk2 = np.array(Image.open(osp.join(im2paths['mask_root'], p, f)))
 
             # load background
             if len(tmp_paths) == 0:
@@ -114,18 +112,22 @@ def bg_gen(bg_dir, im1dict, im2dict):
             bgim = fit_bg(bgim, im1)
 
             # add background
-            out1 = add_bg(im1, mk1, bgim, bgval=im1dict['bgval'])
-            outpath1 = osp.join(im1dict['rgb_out'], p, f)
+            out1 = add_bg(im1, mk1, bgim, bgval=im1paths['bgval'])
+            outpath1 = osp.join(im1paths['rgb_out'], p, f)
             if not osp.isdir(osp.dirname(outpath1)):
                 os.makedirs(osp.dirname(outpath1))
             Image.fromarray(out1).save(outpath1)
 
-            out2 = add_bg(im2, mk2, bgim, bgval=im2dict['bgval'])
-            outpath2 = osp.join(im2dict['rgb_out'], p, f)
+            out2 = add_bg(im2, mk2, bgim, bgval=im2paths['bgval'])
+            outpath2 = osp.join(im2paths['rgb_out'], p, f)
             if not osp.isdir(osp.dirname(outpath2)):
                 os.makedirs(osp.dirname(outpath2))
             Image.fromarray(out2).save(outpath2)
 
+            flowpath = osp.join(flow_root, p, ff)
+            lines.append('\t'.join([outpath1, outpath2, flowpath ]))
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+    return lines
 
 
 def run_arap(path, progress):
@@ -138,7 +140,7 @@ def run_arap(path, progress):
     print '[{:.2f}% ] | Elapsed {:.3f}s'.format(progress*100, time.time() - begin)
 
 # TODO strip all the input path trailing slash
-def prepare_arap(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
+def arap_deform(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
 
     paths = dict()
     # scan by constraints files since rgb_root contains more file than there really is
@@ -238,7 +240,7 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     elapsed = time.time() - begin
     return elapsed
 
-def prepare_matching(fd, rgb_root, msk_root, cst_root):
+def matching(fd, rgb_root, msk_root, cst_root):
 
     # TODO have the file pattern input from argument
     reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
@@ -268,30 +270,52 @@ def prepare_matching(fd, rgb_root, msk_root, cst_root):
 
 def main(flags):
 
+    org_color_root = osp.join(input_root, orgcolor)
+    org_mask_root = osp.join(input_root, orgmask)
+    constraint_root = osp.join(output_root, constraints_dir)
+    flow_root = osp.join(output_root, flow_dir)
 
-    im1dict = dict()
-    im1dict['rgb_root'] = osp.join(input_root, color_dir)
-    im1dict['mask_root'] = osp.join(input_root, mask_dir)
-    im1dict['rgb_out'] = osp.join(output_root, color_dir)
-    im1dict['bgval'] = ARAP_BG
-    im2dict = dict()
-    im2dict['rgb_root'] = osp.join(output_root, wrgb_dir)
-    im2dict['mask_root'] = osp.join(output_root, wMask_dir)
-    im2dict['rgb_out'] = osp.join(output_root, wrgb_dir)
-    im2dict['bgval'] = 0
-    bg_gen('/home/hale/TrimBot/projects/flickr_downloader/tt', im1dict, im2dict)
 
-    #prepare_matching(1, osp.join(input_root, orgcolor), osp.join(input_root, orgmask),
-    #        osp.join(output_root, constraints_dir))
-    ## TODO check if input images are jpg and convert to png
-    #convert_rgb(osp.join(input_root, orgcolor), osp.join(input_root, color_dir))
-    #convert_mask(osp.join(input_root, orgmask), osp.join(input_root, mask_dir))
-    #prepare_arap(osp.join(input_root, color_dir),
-    #        osp.join(input_root, mask_dir),
-    #        osp.join(output_root, constraints_dir),
-    #        osp.join(output_root, flow_dir),
-    #        osp.join(output_root, wrgb_dir),
-    #        osp.join(output_root, wMask_dir))
+    im1paths = dict()
+    im1paths['rgb_root'] = osp.join(input_root, color_dir)
+    im1paths['mask_root'] = osp.join(input_root, mask_dir)
+    im1paths['rgb_out'] = osp.join(output_root, color_dir)
+    im1paths['bgval'] = ARAP_BG
+
+    im2paths = dict()
+    im2paths['rgb_root'] = osp.join(output_root, wrgb_dir)
+    im2paths['mask_root'] = osp.join(output_root, wMask_dir)
+    im2paths['rgb_out'] = osp.join(output_root, wrgb_dir)
+    im2paths['bgval'] = 0
+
+
+    print 'Image matching',
+    sys.stdout.flush()
+    begin = time.time()
+    matching(1, org_color_root , org_mask_root, constraint_root)
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+    sys.stdout.flush()
+
+    # TODO check if input images are jpg and convert to png
+    print 'Converting original images',
+    sys.stdout.flush()
+    begin = time.time()
+    convert_rgb(org_color_root, im1paths['rgb_root'])
+    convert_mask(org_mask_root, im1paths['mask_root'])
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+    sys.stdout.flush()
+
+    print 'Image ARAP deformation',
+    sys.stdout.flush()
+    begin = time.time()
+    arap_deform(im1paths['rgb_root'], im1paths['mask_root'],
+                constraint_root, flow_root,
+                im2paths['rgb_root'], im2paths['mask_root'])
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+    print 'Adding static background',
+    lines = bg_gen(bg_dir, im1paths, im2paths, flow_root)
+    open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(lines))
+
 
 
 if __name__ == "__main__":

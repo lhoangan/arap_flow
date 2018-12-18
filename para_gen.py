@@ -1,3 +1,4 @@
+import shutil
 import sys, re, time
 import argparse
 import numpy as np
@@ -5,17 +6,15 @@ import random as rn
 from math import sqrt
 from PIL import Image
 import os, os.path as osp
-from multiprocessing import Process, cpu_count
+from multiprocessing import Process
 from subprocess import call
-import matplotlib.pyplot as plt
-from joblib import Parallel, delayed
 
 arap_bin = '/home/hale/TrimBot/projects/ARAP_flow/Warp/deformation/image_warping'
 dm_bin = 'deepmatching/deepmatching_1.2.2_c++/deepmatching-static'
 
 input_root = 'data/DAVIS/'
 output_root = 'data/DAVIS/fd1'
-bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/tt'
+bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/img_downloads'
 
 orgcolor = 'orgRGB'
 orgmask = 'orgMasks'
@@ -27,7 +26,7 @@ flow_dir = 'Flow'
 wrgb_dir = 'wRGB'
 wMask_dir = 'wMasks'
 
-frame_distance = 1
+fd = 1
 
 ARAP_BG = 255
 
@@ -145,7 +144,7 @@ def run_arap(path): #, progress):
 # TODO strip all the input path trailing slash
 def arap_deform(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
 
-    paths = dict()
+    paths = []
     # scan by constraints files since rgb_root contains more file than there really is
     scan_root = cst_root
     for root, dirs, files in os.walk(scan_root):
@@ -170,30 +169,28 @@ def arap_deform(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
                     os.makedirs(osp.dirname(p))
             paths[seq].append(line)
 
-def do_arap(paths):
+def do_arap(paths, bgs):
 
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
         os.makedirs('tmp')
     try:
-        files = []
-        # create temporary list files
-        for key in paths:
-            # TODO use try and finally to clean the temporary files
-            fn = key.replace('/', '_')
-            # TODO tmp folder
-            open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths[key]))
-            files.append(osp.abspath('tmp/{}.txt'.format(fn)))
-
-        num_cores = int(cpu_count() / 2) # TODO gpu capcity
-        n = float(len(paths.keys()))
-        run_arap(files[0])
-        #Parallel(n_jobs=num_cores) \
-        #        (delayed(run_arap)(p, i/n) for i, p in enumerate(files))
+        fn = str(time.time()).replace('.', '_')
+        open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths))
+        path = osp.abspath('tmp/{}.txt'.format(fn))
+        run_arap(path)
     finally:
         # clean up
-        import shutil
         shutil.rmtree('tmp')
+
+    # add background
+    for path, bg in zip(paths, bgs):
+        pt, mk = path.split(' ')[-2:]
+        im = np.array(Image.open(pt))
+        mk = np.array(Image.open(mk))
+        im = add_bg(im, mk, bg, bgval=0)
+        Image.fromarray(im).save(pt)
+
 
 # TODO: have a mechanism to input constraints from file and not run again
 def run_matching(img1, img2, msk1, msk2, out_file):
@@ -227,10 +224,62 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     print  'Finish matching for ',img1
     return elapsed
 
-def matching(fd, rgb_org, msk_org, cst_root, rgb_root, msk_root, flo_root, wco_root, wmk_root):
+def main(flags):
 
-    ps = []
-    paths = dict()
+    rgb_org = osp.join(input_root, orgcolor)
+    msk_org = osp.join(input_root, orgmask)
+    cst_root = osp.join(output_root, constraints_dir)
+    flo_root = osp.join(output_root, flow_dir)
+
+    rgb_root = osp.join(output_root, color_dir)
+    msk_root = osp.join(output_root, mask_dir)
+    wco_root = osp.join(output_root, wrgb_dir)
+    wmk_root = osp.join(output_root, wMask_dir)
+
+    im1paths = dict()
+    im1paths['rgb_root'] = osp.join(input_root, color_dir)
+    im1paths['mask_root'] = osp.join(input_root, mask_dir)
+    im1paths['rgb_out'] = osp.join(output_root, color_dir)
+    im1paths['bgval'] = ARAP_BG
+
+    im2paths = dict()
+    im2paths['rgb_root'] = osp.join(output_root, wrgb_dir)
+    im2paths['mask_root'] = osp.join(output_root, wMask_dir)
+    im2paths['rgb_out'] = osp.join(output_root, wrgb_dir)
+    im2paths['bgval'] = 0
+
+    # get list of all background
+    bg_paths = []
+    print "Scanning background directory... ",
+    begin = time.time()
+    for root, _, files in os.walk(bg_dir):
+        for f in files:
+            if '.PNG' not in f.upper() and \
+                '.JPG' not in f.upper() and  '.JPEG' not in f.upper():
+                continue
+            bg_paths.append(osp.join(root, f))
+            try:
+                im = np.array(Image.open(osp.join(root, f)))
+                if im.shape[2] == 3:
+                    bg_paths.append(osp.join(root, f))
+            except:
+                continue
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+
+    tmp_paths = []
+
+    print 'Image matching',
+    sys.stdout.flush()
+    begin = time.time()
+    #paths = matching(1, org_color_root , org_mask_root, constraint_root, im1paths['rgb_root'], im1paths['mask_root'], flow_root, im2paths['rgb_root'], im2paths['mask_root'])
+    #print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+    #sys.stdout.flush()
+
+
+    bgs = []
+    proc = None
+    lmdb_paths = []
+    arap_paths = []
     # TODO have the file pattern input from argument
     reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
     for root, dirs, _ in os.walk(rgb_org):
@@ -268,14 +317,6 @@ def matching(fd, rgb_org, msk_org, cst_root, rgb_root, msk_root, flo_root, wco_r
                             osp.join(cst_root,seq, f +'.txt'))
                 print 'Start matching for: ', d, f
 
-                # Convert JPEG to PNG
-                if '.JPG' in f1.upper() or '.JPEG' in f1.upper():
-                    im = Image.open(osp.join(root, d, f1))
-                    outdir = osp.join(rgb_root, seq)
-                    if not osp.isdir(outdir):
-                        os.makedirs(outdir)
-                    im.save(osp.join(outdir, f+'.png'))
-
                 # Convert mask
                 im = np.array(Image.open(osp.join(msk_org, d, f+'.png')))
                 outdir = osp.join(msk_root, seq)
@@ -285,74 +326,74 @@ def matching(fd, rgb_org, msk_org, cst_root, rgb_root, msk_root, flo_root, wco_r
                 mask[im==0] = ARAP_BG # TODO mask with each object segment separately
                 Image.fromarray(mask).save(osp.join(outdir, f+'.png'))
 
+                # load background
+                while True:
+                    if len(tmp_paths) == 0:
+                        tmp_paths = sorted(bg_paths[:]) # copy
+                    bgpath = rn.choice(tmp_paths)
+                    tmp_paths.remove(bgpath)
+                    try:
+                        bgim = np.array(Image.open(bgpath))
+                        if bgim.shape[2] == 3:
+                            break
+                    except:
+                        pass
+                    # if something wrong happens
+                    bg_paths.remove(bgpath)
 
 
+                # Convert JPEG to PNG
+                im = np.array(Image.open(osp.join(root, d, f1)))
+                # fit background to the image size
+                bgim = fit_bg(bgim, im)
+                # add background
+                out1 = add_bg(im, mask, bgim, bgval=im1paths['bgval'])
+                # output
+                outdir = osp.join(rgb_root, seq)
+                if not osp.isdir(outdir):
+                    os.makedirs(outdir)
+                Image.fromarray(out1).save(osp.join(outdir, f+'.png'))
                 # =================
 
-                paths[seq] = paths.get(seq, [])
+                bgs.append(bgim)
 
-                line =' '.join([osp.join(rgb_root, seq, f+'.png'),
-                                osp.join(msk_root, seq, f+'.png'),
-                                osp.join(cst_root, seq, f+'.txt'),
-                                osp.join(flo_root, seq, f+'.flo'),
-                                osp.join(wco_root, seq, f+'.png'),
-                                osp.join(wmk_root, seq, f+'.png')])
+                line =' '.join([osp.abspath(osp.join(rgb_root, seq, f+'.png')),
+                                osp.abspath(osp.join(msk_root, seq, f+'.png')),
+                                osp.abspath(osp.join(cst_root, seq, f+'.txt')),
+                                osp.abspath(osp.join(flo_root, seq, f+'.flo')),
+                                osp.abspath(osp.join(wco_root, seq, f+'.png')),
+                                osp.abspath(osp.join(wmk_root, seq, f+'.png'))])
 
                 for p in line.split(' ')[:2]:
                     assert osp.exists(p), 'File not found:\n{}'.format(p)
                 for p in line.split(' ')[3:]:
                     if not osp.isdir(osp.dirname(p)):
                         os.makedirs(osp.dirname(p))
-                paths[seq].append(line)
 
-                if len(paths[seq]) > 12:
-                    for pp in ps:
-                        pp.join()
-                    p2 = Process(target = do_arap, args=(paths,))
-                    ps.append(p2)
-                    p2.start()
-                    print 'Start arap for: ', len(paths[seq])
-                    paths[seq] = []
+                arap_paths.append(line)
+                lmdb_paths.append(' '.join([line.split(' ')[i] for i in [0, 3, 4]]))
 
-    return paths
+                if len(arap_paths) > 5:
+                    if proc is not None:
+                        proc.join()
+                    proc = Process(target=do_arap, args=(arap_paths,bgs))
+                    proc.start()
+                    print 'Start arap for: ', len(arap_paths)
+                    arap_paths = []
+                    bgs = []
 
+    
+    open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(lmdb_paths))
+    return lmdb_paths
 
-def main(flags):
-
-    org_color_root = osp.join(input_root, orgcolor)
-    org_mask_root = osp.join(input_root, orgmask)
-    constraint_root = osp.join(output_root, constraints_dir)
-    flow_root = osp.join(output_root, flow_dir)
-
-
-    im1paths = dict()
-    im1paths['rgb_root'] = osp.join(input_root, color_dir)
-    im1paths['mask_root'] = osp.join(input_root, mask_dir)
-    im1paths['rgb_out'] = osp.join(output_root, color_dir)
-    im1paths['bgval'] = ARAP_BG
-
-    im2paths = dict()
-    im2paths['rgb_root'] = osp.join(output_root, wrgb_dir)
-    im2paths['mask_root'] = osp.join(output_root, wMask_dir)
-    im2paths['rgb_out'] = osp.join(output_root, wrgb_dir)
-    im2paths['bgval'] = 0
-
-
-    print 'Image matching',
-    sys.stdout.flush()
-    begin = time.time()
-    paths = matching(1, org_color_root , org_mask_root, constraint_root, im1paths['rgb_root'], im1paths['mask_root'], flow_root, im2paths['rgb_root'], im2paths['mask_root'])
-    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
-    sys.stdout.flush()
-
-    # TODO check if input images are jpg and convert to png
-    print 'Converting original images',
-    sys.stdout.flush()
-    begin = time.time()
-    #convert_rgb(org_color_root, im1paths['rgb_root'])
-    #convert_mask(org_mask_root, im1paths['mask_root'])
-    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
-    sys.stdout.flush()
+    ## TODO check if input images are jpg and convert to png
+    #print 'Converting original images',
+    #sys.stdout.flush()
+    #begin = time.time()
+    ##convert_rgb(org_color_root, im1paths['rgb_root'])
+    ##convert_mask(org_mask_root, im1paths['mask_root'])
+    #print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+    #sys.stdout.flush()
 
     print 'Image ARAP deformation',
     sys.stdout.flush()
@@ -363,7 +404,6 @@ def main(flags):
     print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
     print 'Adding static background',
     lines = bg_gen(bg_dir, im1paths, im2paths, flow_root)
-    open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(lines))
 
 
 

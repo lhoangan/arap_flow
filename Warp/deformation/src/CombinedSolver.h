@@ -156,7 +156,7 @@ public:
                 m_solverInfo.clear();
             m_dims = {  (unsigned int) m_orgRGB.getWidth(),
                         (unsigned int) m_orgRGB.getHeight() };
-            addOptSolvers(m_dims, "image_warping.t", m_combinedSolverParameters.optDoublePrecision);
+            addOptSolvers(m_dims, m_planPath, m_combinedSolverParameters.optDoublePrecision);
         }
 
         m_urshape           = createEmptyOptImage(m_dims, OptImage::Type::FLOAT, 2, OptImage::GPU, true);

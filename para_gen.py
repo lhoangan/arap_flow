@@ -12,9 +12,10 @@ from subprocess import call
 arap_bin = '/home/hale/TrimBot/projects/ARAP_flow/Warp/deformation/image_warping'
 dm_bin = 'deepmatching/deepmatching_1.2.2_c++/deepmatching-static'
 
-input_root = 'data/DAVIS/'
-output_root = 'data/DAVIS/fd1'
-bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/img_downloads'
+input_root = 'data/ImgNetVID/'
+output_root = 'data/ImgNetVID/fd1'
+#bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/img_downloads'
+bg_dir = '/home/hale/TrimBot/projects/optflow/naturedata'
 
 orgcolor = 'orgRGB'
 orgmask = 'orgMasks'
@@ -34,8 +35,8 @@ ARAP_BG = 255
 #=============================================================================
 
 def fit_bg(bg, im):
-    imh, imw, _ = im.shape
-    bgh, bgw, _ = bg.shape
+    imh, imw = im.shape[:2]
+    bgh, bgw = bg.shape[:2]
     bgim = Image.fromarray(bg)
 
     hmax = max(bgh, imh)
@@ -54,7 +55,10 @@ def add_bg(im, mk, bgim, bgval):
             str(bgim.shape) + ' vs. ' + str(im.shape)
     out = im.copy()
     idx = mk==bgval
-    out[idx] = bgim[idx]
+    if len(out.shape) == 3:
+        out[idx] = bgim[idx]
+    else:
+        out = bgim
     return out
 
 def bg_gen(bg_dir, im1paths, im2paths, flow_root):
@@ -191,6 +195,11 @@ def do_arap(paths, bgs):
         im = add_bg(im, mk, bg, bgval=0)
         Image.fromarray(im).save(pt)
 
+def valid_cnstr(x1, y1, x2, y2, msk1, msk2):
+
+    dist = sqrt((x2-x1)**2 + (y2-y1)**2)
+    return  dist < 60 and dist > 0 and msk1[y1, x1] > 0 and msk1[y1, x1] == msk2[y2, x2]
+
 
 # TODO: have a mechanism to input constraints from file and not run again
 def run_matching(img1, img2, msk1, msk2, out_file):
@@ -216,13 +225,24 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     # check the constraints
     for line in lines:
         x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
-        if sqrt((x2-x1)**2 + (y2-y1)**2) < 60 and msk1[y1, x1] == msk2[y2, x2]:
+        if valid_cnstr(x1, y1, x2, y2, msk1, msk2):
             cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
     # write back to file
     open(out_file, 'w').write('\n'.join([str(len(cstrs))] + cstrs))
     elapsed = time.time() - begin
     print  'Finish matching for ',img1
-    return elapsed
+    return len(cstrs)
+
+def has_mask(msk_root, f, f2):
+
+    try:
+        mask1 = np.array(Image.open(osp.join(msk_root, f+'.png')))
+        mask2 = np.array(Image.open(osp.join(msk_root, f2+'.png')))
+    except:
+        return False
+
+    return mask1.sum() > 10 and mask2.sum() > 10
+
 
 def main(flags):
 
@@ -258,12 +278,6 @@ def main(flags):
                 '.JPG' not in f.upper() and  '.JPEG' not in f.upper():
                 continue
             bg_paths.append(osp.join(root, f))
-            try:
-                im = np.array(Image.open(osp.join(root, f)))
-                if im.shape[2] == 3:
-                    bg_paths.append(osp.join(root, f))
-            except:
-                continue
     print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
 
     tmp_paths = []
@@ -303,18 +317,26 @@ def main(flags):
                 nxt = int(num.group(1))+fd
                 f2 = f.replace(num.group(1), n.format(nxt))
                 # skipping if out of second frame
-                if not osp.exists(osp.join(root, d, f2+ext)):
+                if not osp.exists(osp.join(rgb_org, seq, f1)) or \
+                    not osp.exists(osp.join(rgb_org, seq, f2+ext)) or \
+                    not osp.exists(osp.join(msk_org, seq, f +'.png')) or \
+                    not osp.exists(osp.join(msk_org, seq, f2+'.png')):
                     continue
 
                 # preparing for output
                 if not osp.isdir(osp.join(cst_root, seq)):
                     os.makedirs(osp.join(cst_root, seq))
 
-                run_matching(osp.join(rgb_org, seq, f1),
+                if not has_mask(osp.join(msk_org, seq), f, f2):
+                    continue
+
+                ncstr = run_matching(osp.join(rgb_org, seq, f1),
                             osp.join(rgb_org, seq, f2+ext),
                             osp.join(msk_org, seq, f +'.png'),
                             osp.join(msk_org, seq, f2+'.png'),
                             osp.join(cst_root,seq, f +'.txt'))
+                if ncstr == 0:
+                    continue
                 print 'Start matching for: ', d, f
 
                 # Convert mask
@@ -342,8 +364,23 @@ def main(flags):
                     bg_paths.remove(bgpath)
 
 
-                # Convert JPEG to PNG
+                # Convert JPEG to PNG, if needed
                 im = np.array(Image.open(osp.join(root, d, f1)))
+                # check if the image is portrait
+                if im.shape[0] > im.shape[1]:
+                    im = im.transpose((1, 0, 2))
+                    mask = mask.transpose((1, 0))
+                    # transposing constraints
+                    cstr_path = osp.abspath(osp.join(cst_root, seq, f+'.txt'))
+                    lines = open(cstr_path).read().splitlines()
+                    nls = []
+                    for line in lines:
+                        if '\t' not in line:
+                            continue
+                        x1, y1, x2, y2 = line.split('\t')
+                        nls.append('\t'.join([y1, x1, y2, x2]))
+                    open(cstr_path, 'w').write('\n'.join([str(len(nls))]+nls))
+
                 # fit background to the image size
                 bgim = fit_bg(bgim, im)
                 # add background
@@ -371,7 +408,7 @@ def main(flags):
                         os.makedirs(osp.dirname(p))
 
                 arap_paths.append(line)
-                lmdb_paths.append(' '.join([line.split(' ')[i] for i in [0, 3, 4]]))
+                lmdb_paths.append(' '.join([line.split(' ')[i] for i in [0, 4, 3]]))
 
                 if len(arap_paths) > 5:
                     if proc is not None:

@@ -125,7 +125,9 @@ def bg_gen(bg_dir, im1paths, im2paths, flow_root):
             Image.fromarray(out2).save(outpath2)
 
             flowpath = osp.join(flow_root, p, ff)
-            lines.append('\t'.join([outpath1, outpath2, flowpath ]))
+            lines.append('\t'.join([osp.abspath(outpath1),
+                                    osp.abspath(outpath2),
+                                    osp.abspath(flowpath)]))
     print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
     return lines
 
@@ -170,18 +172,22 @@ def arap_deform(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
         os.makedirs('tmp')
-    files = []
-    # create temporary list files
-    for key in paths:
-        # TODO use try and finally to clean the temporary files
-        fn = key.replace('/', '_')
-        # TODO tmp folder
-        open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths[key]))
-        files.append(osp.abspath('tmp/{}.txt'.format(fn)))
+    try:
+        files = []
+        # create temporary list files
+        for key in paths:
+            fn = key.replace('/', '_')
+            open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths[key]))
+            files.append(osp.abspath('tmp/{}.txt'.format(fn)))
 
-    num_cores = int(multiprocessing.cpu_count() / 2) # TODO gpu capcity
-    n = float(len(paths.keys()))
-    Parallel(n_jobs=num_cores)(delayed(run_arap)(p, i/n) for i, p in enumerate(files))
+        num_cores = int(multiprocessing.cpu_count() / 2) # TODO gpu capcity
+        n = float(len(paths.keys()))
+        Parallel(n_jobs=num_cores)(
+                    delayed(run_arap)(p, i/n) for i, p in enumerate(files))
+    finally:
+        # clean up
+        import shutil
+        shutil.rmtree('tmp')
 
 def convert_rgb(jpg_root, png_root):
     for root, _, files in os.walk(jpg_root):

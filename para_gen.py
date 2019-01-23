@@ -420,8 +420,18 @@ def main(flags):
                     bgs = []
 
     
-    open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(lmdb_paths))
-    return lmdb_paths
+    # check sums
+    out_paths = []
+    for line in lmdb_paths:
+        all_good = True
+        for l in line.split('\t'):
+            if not osp.exists(l):
+                all_good = False
+                break
+        if all_good:
+            out_paths.append(line)
+    open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(out_paths))
+    return out_paths
 
     ## TODO check if input images are jpg and convert to png
     #print 'Converting original images',

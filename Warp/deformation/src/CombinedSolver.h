@@ -350,8 +350,18 @@ public:
     }
 
     std::vector<float>* warpField() {
+
         std::vector<float>* warpField = new std::vector<float>(m_dims[0]*m_dims[1]*2);
         m_warpField->copyTo(*warpField);
+
+        // Converting warp field to flow field, by subtracting the grid index
+        int n = m_dims[0] * 2;
+        for (unsigned int y = 0; y < m_dims[1]; y++)
+            for (unsigned int x = 0; x < m_dims[0]; x++) {
+                (*warpField)[y*n + 2*x] -= (float)x;
+                (*warpField)[y*n + 2*x + 1] -= (float)y;
+            }
+
         return warpField;
     }
 

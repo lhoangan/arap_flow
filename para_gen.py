@@ -17,8 +17,8 @@ output_root = 'data/ImgNetVID/fd1'
 #bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/img_downloads'
 bg_dir = '/home/hale/TrimBot/projects/optflow/naturedata'
 
-orgcolor = 'xxRGB'
-orgmask = 'xxMask'
+orgcolor = 'orgRGB'
+orgmask = 'orgMasks'
 color_dir = 'inpRGB'
 mask_dir = 'inpMasks'
 constraints_dir = 'tmpCnstr'
@@ -210,28 +210,10 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     assert osp.exists(msk2), 'File not found: \n{}'.format(msk2)
 
     cmd = './{} {} {} -nt 0 -out {} '.format(dm_bin, img1, img2, out_file)
-    begin = time.time()
     # call the deep matching module from shell
     status = call(cmd, shell=True)
     assert status == 0, \
         'Deep matching exited with code {:d}. The command is \n{}'.format(status, cmd)
-
-    # Filter constraints to  belong in the same segment type and within radius 60px
-    # Load mask1 and mask2 images
-    msk1 = np.array(Image.open(msk1))
-    msk2 = np.array(Image.open(msk2))
-    lines = open(out_file).read().splitlines()
-    cstrs = []
-    # check the constraints
-    for line in lines:
-        x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
-        if valid_cnstr(x1, y1, x2, y2, msk1, msk2):
-            cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
-    # write back to file
-    open(out_file, 'w').write('\n'.join([str(len(cstrs))] + cstrs))
-    elapsed = time.time() - begin
-    print  'Finish matching for ',img1
-    return len(cstrs)
 
 def has_mask(msk1_path, msk2_path):
 
@@ -243,6 +225,47 @@ def has_mask(msk1_path, msk2_path):
 
     return mask1.sum() > 10 and mask2.sum() > 10
 
+def scale_rotate(im_path, mk_path):
+
+    im = Image.open(im_path)
+    mk = Image.open(mk_path)
+
+    assert im.size == mk.size, 'Image and mask must be of the same size' \
+            'but given {:s} vs. {:s}'.format(str(im.size), str(mk.size))
+
+    preprocessed = False
+    if max(im.size) > 1024:
+        r = 1024.0 / max(im.size)
+        im = im.resize((int(im.size[0]*r), int(im.size[1]*r)), Image.ANTIALIAS)
+        mk = mk.resize((int(mk.size[0]*r), int(mk.size[1]*r)), Image.ANTIALIAS)
+        preprocessed = True
+
+    # check if the image is portrait, i.e. height > width
+    if im.size[1] > im.size[0]:
+        im = im.transpose(Image.TRANSPOSE)
+        mk = mk.transpose(Image.TRANPOSE)
+        preprocessed = True
+
+    return (preprocessed, im, mk)
+
+
+def preprocess(p):
+
+    preprocessed, im1, mk1 = scale_rotate(p['rgb1_org'], p['msk1_org'])
+    if preprocessed:
+        im1.save(p['rgb1_gen'])
+        mk1.save(p['msk1_gen'])
+        p['rgb1_org'] = p['rgb1_gen']
+        p['msk1_org'] = p['msk1_gen']
+
+    preprocessed, im2, mk2 = scale_rotate(p['rgb2_org'], p['msk2_org'])
+    if preprocessed:
+        im2.save(p['rgb2_gen'])
+        mk2.save(p['msk2_gen'])
+        p['rgb2_org'] = p['rgb2_gen']
+        p['msk2_org'] = p['msk2_gen']
+
+    return np.array(im1), np.array(mk1), np.array(im2), np.array(mk2)
 
 def main(flags):
 
@@ -342,9 +365,8 @@ def main(flags):
 
                 all_paths.append(entry)
 
-    print '\t\t{:d} files [Done] | {:.3f} seconds'.format(
-                len(all_paths),
-                time.time() - begin)
+    print '\t\t{:d} files [Done] | {:.3f} seconds'.format(len(all_paths), time.time() - begin)
+
 
     for k in all_paths[0]:
         print k, '|', all_paths[0][k]
@@ -352,24 +374,38 @@ def main(flags):
     for p in all_paths:
 
         # preparing for output
-        if not osp.isdir(osp.dirname(p['cstr_tmp'])):
-            os.makedirs(osp.dirname(p['cstr_tmp']))
+        for k in p:
+            if not osp.isdir(osp.dirname(p[k])):
+                os.makedirs(osp.dirname(p[k]))
+
+
+        im1, mk1, im2, mk2 = preprocess(p)
 
         if not has_mask(p['msk1_org'], p['msk2_org']):
             continue
 
-        ncstr = run_matching(   p['rgb1_org'], p['rgb2_org'],
-                                p['msk1_org'], p['msk2_org'], p['cstr_tmp'])
-        if ncstr == 0:
+        run_matching(p['rgb1_org'], p['rgb2_org'],
+                    p['msk1_org'], p['msk2_org'], p['cstr_tmp'])
+
+        # Filter constraints to  belong in the same segment type and within radius 60px
+        # Load mask1 and mask2 images
+        lines = open(p['cstr_tmp']).read().splitlines()
+        cstrs = []
+        # check the constraints
+        for line in lines:
+            x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
+            if valid_cnstr(x1, y1, x2, y2, mk1, mk2):
+                cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
+        # write back to file
+        open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
+        if len(cstrs) == 0:
             continue
-        print 'Start matching for: ', d, f
 
         # Convert mask
-        im = np.array(Image.open(p['msk1_org']))
         if not osp.isdir(osp.dirname(p['msk1_gen'])):
             os.makedirs(osp.dirname(p['msk1_gen']))
-        mask = np.zeros_like(im, dtype=np.uint8)
-        mask[im==0] = ARAP_BG # TODO mask with each object segment separately
+        mask = np.zeros_like(mk1, dtype=np.uint8)
+        mask[mk1==0] = ARAP_BG # TODO mask with each object segment separately
         Image.fromarray(mask).save(p['msk1_gen'])
 
         # load background
@@ -387,27 +423,10 @@ def main(flags):
             # if something wrong happens
             bg_paths.remove(bgpath)
 
-
-        # Convert JPEG to PNG, if needed
-        im = np.array(Image.open(p['rgb1_org']))
-        # check if the image is portrait
-        if im.shape[0] > im.shape[1]:
-            im = im.transpose((1, 0, 2))
-            mask = mask.transpose((1, 0))
-            # transposing constraints
-            lines = open(p['cstr_tmp']).read().splitlines()
-            nls = []
-            for line in lines:
-                if '\t' not in line:
-                    continue
-                x1, y1, x2, y2 = line.split('\t')
-                nls.append('\t'.join([y1, x1, y2, x2]))
-            open(p['cstr_tmp'], 'w').write('\n'.join([str(len(nls))]+nls))
-
         # fit background to the image size
-        bgim = fit_bg(bgim, im)
+        bgim = fit_bg(bgim, im1)
         # add background
-        out1 = add_bg(im, mask, bgim, bgval=im1paths['bgval'])
+        out1 = add_bg(im1, mask, bgim, bgval=im1paths['bgval'])
         # output
         if not osp.isdir(osp.dirname(p['rgb1_gen'])):
             os.makedirs(osp.dirname(p['rgb1_gen']))

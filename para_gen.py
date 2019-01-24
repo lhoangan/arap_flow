@@ -17,8 +17,8 @@ output_root = 'data/ImgNetVID/fd1'
 #bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/img_downloads'
 bg_dir = '/home/hale/TrimBot/projects/optflow/naturedata'
 
-orgcolor = 'orgRGB'
-orgmask = 'orgMasks'
+orgcolor = 'xxRGB'
+orgmask = 'xxMask'
 color_dir = 'inpRGB'
 mask_dir = 'inpMasks'
 constraints_dir = 'tmpCnstr'
@@ -233,11 +233,11 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     print  'Finish matching for ',img1
     return len(cstrs)
 
-def has_mask(msk_root, f, f2):
+def has_mask(msk1_path, msk2_path):
 
     try:
-        mask1 = np.array(Image.open(osp.join(msk_root, f+'.png')))
-        mask2 = np.array(Image.open(osp.join(msk_root, f2+'.png')))
+        mask1 = np.array(Image.open(msk1_path))
+        mask2 = np.array(Image.open(msk2_path))
     except:
         return False
 
@@ -282,20 +282,22 @@ def main(flags):
 
     tmp_paths = []
 
-    print 'Image matching',
-    sys.stdout.flush()
     begin = time.time()
     #paths = matching(1, org_color_root , org_mask_root, constraint_root, im1paths['rgb_root'], im1paths['mask_root'], flow_root, im2paths['rgb_root'], im2paths['mask_root'])
     #print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
     #sys.stdout.flush()
 
-
     bgs = []
     proc = None
+    all_paths = []
     lmdb_paths = []
     arap_paths = []
     # TODO have the file pattern input from argument
     reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
+
+    print 'Scanning data to be processed',
+    sys.stdout.flush()
+    begin = time.time()
     for root, dirs, _ in os.walk(rgb_org):
         # check if the folder contain files of the wanted pattern
         for d in dirs:
@@ -305,6 +307,10 @@ def main(flags):
 
                 seq = root.replace(rgb_org, '').strip(osp.sep)
                 seq = osp.join(seq, d)
+                f, ext = osp.splitext(f1) # strip extension path
+
+                if not osp.exists(osp.join(msk_org, seq, f +'.png')):
+                    continue
 
                 # getting frame number
                 num = reg.search(f1)
@@ -312,114 +318,129 @@ def main(flags):
                     continue
                 n = '{:0'+str(len(num.group(1)))+'d}'
 
-                f, ext = osp.splitext(f1) # strip extension path
                 # getting next frame according to frame distance fd
                 nxt = int(num.group(1))+fd
                 f2 = f.replace(num.group(1), n.format(nxt))
                 # skipping if out of second frame
-                if not osp.exists(osp.join(rgb_org, seq, f1)) or \
-                    not osp.exists(osp.join(rgb_org, seq, f2+ext)) or \
-                    not osp.exists(osp.join(msk_org, seq, f +'.png')) or \
+                if not osp.exists(osp.join(rgb_org, seq, f2+ext)) or \
                     not osp.exists(osp.join(msk_org, seq, f2+'.png')):
                     continue
 
-                # preparing for output
-                if not osp.isdir(osp.join(cst_root, seq)):
-                    os.makedirs(osp.join(cst_root, seq))
+                entry = {}
+                entry['rgb1_gen'] = osp.abspath(osp.join(rgb_root, seq, f+'.png'))
+                entry['msk1_gen'] = osp.abspath(osp.join(msk_root, seq, f+'.png'))
+                entry['rgb2_gen'] = osp.abspath(osp.join(wco_root, seq, f+'.png'))
+                entry['msk2_gen'] = osp.abspath(osp.join(wmk_root, seq, f+'.png'))
 
-                if not has_mask(osp.join(msk_org, seq), f, f2):
+                entry['cstr_tmp'] = osp.abspath(osp.join(cst_root, seq, f+'.txt'))
+                entry['flow_gen'] = osp.abspath(osp.join(flo_root, seq, f+'.flo'))
+
+                entry['rgb1_org'] = osp.abspath(osp.join(rgb_org, seq, f1))
+                entry['msk1_org'] = osp.abspath(osp.join(msk_org, seq, f+'.png'))
+                entry['rgb2_org'] = osp.abspath(osp.join(rgb_org, seq, f2+ext))
+                entry['msk2_org'] = osp.abspath(osp.join(msk_org, seq, f2+'.png'))
+
+                all_paths.append(entry)
+
+    print '\t\t{:d} files [Done] | {:.3f} seconds'.format(
+                len(all_paths),
+                time.time() - begin)
+
+    for k in all_paths[0]:
+        print k, '|', all_paths[0][k]
+
+    for p in all_paths:
+
+        # preparing for output
+        if not osp.isdir(osp.dirname(p['cstr_tmp'])):
+            os.makedirs(osp.dirname(p['cstr_tmp']))
+
+        if not has_mask(p['msk1_org'], p['msk2_org']):
+            continue
+
+        ncstr = run_matching(   p['rgb1_org'], p['rgb2_org'],
+                                p['msk1_org'], p['msk2_org'], p['cstr_tmp'])
+        if ncstr == 0:
+            continue
+        print 'Start matching for: ', d, f
+
+        # Convert mask
+        im = np.array(Image.open(p['msk1_org']))
+        if not osp.isdir(osp.dirname(p['msk1_gen'])):
+            os.makedirs(osp.dirname(p['msk1_gen']))
+        mask = np.zeros_like(im, dtype=np.uint8)
+        mask[im==0] = ARAP_BG # TODO mask with each object segment separately
+        Image.fromarray(mask).save(p['msk1_gen'])
+
+        # load background
+        while True:
+            if len(tmp_paths) == 0:
+                tmp_paths = sorted(bg_paths[:]) # copy
+            bgpath = rn.choice(tmp_paths)
+            tmp_paths.remove(bgpath)
+            try:
+                bgim = np.array(Image.open(bgpath))
+                if bgim.shape[2] == 3:
+                    break
+            except:
+                pass
+            # if something wrong happens
+            bg_paths.remove(bgpath)
+
+
+        # Convert JPEG to PNG, if needed
+        im = np.array(Image.open(p['rgb1_org']))
+        # check if the image is portrait
+        if im.shape[0] > im.shape[1]:
+            im = im.transpose((1, 0, 2))
+            mask = mask.transpose((1, 0))
+            # transposing constraints
+            lines = open(p['cstr_tmp']).read().splitlines()
+            nls = []
+            for line in lines:
+                if '\t' not in line:
                     continue
+                x1, y1, x2, y2 = line.split('\t')
+                nls.append('\t'.join([y1, x1, y2, x2]))
+            open(p['cstr_tmp'], 'w').write('\n'.join([str(len(nls))]+nls))
 
-                ncstr = run_matching(osp.join(rgb_org, seq, f1),
-                            osp.join(rgb_org, seq, f2+ext),
-                            osp.join(msk_org, seq, f +'.png'),
-                            osp.join(msk_org, seq, f2+'.png'),
-                            osp.join(cst_root,seq, f +'.txt'))
-                if ncstr == 0:
-                    continue
-                print 'Start matching for: ', d, f
+        # fit background to the image size
+        bgim = fit_bg(bgim, im)
+        # add background
+        out1 = add_bg(im, mask, bgim, bgval=im1paths['bgval'])
+        # output
+        if not osp.isdir(osp.dirname(p['rgb1_gen'])):
+            os.makedirs(osp.dirname(p['rgb1_gen']))
+        Image.fromarray(out1).save(p['rgb1_gen'])
+        # =================
 
-                # Convert mask
-                im = np.array(Image.open(osp.join(msk_org, d, f+'.png')))
-                outdir = osp.join(msk_root, seq)
-                if not osp.isdir(outdir):
-                    os.makedirs(outdir)
-                mask = np.zeros_like(im, dtype=np.uint8)
-                mask[im==0] = ARAP_BG # TODO mask with each object segment separately
-                Image.fromarray(mask).save(osp.join(outdir, f+'.png'))
+        bgs.append(bgim)
 
-                # load background
-                while True:
-                    if len(tmp_paths) == 0:
-                        tmp_paths = sorted(bg_paths[:]) # copy
-                    bgpath = rn.choice(tmp_paths)
-                    tmp_paths.remove(bgpath)
-                    try:
-                        bgim = np.array(Image.open(bgpath))
-                        if bgim.shape[2] == 3:
-                            break
-                    except:
-                        pass
-                    # if something wrong happens
-                    bg_paths.remove(bgpath)
+        line =' '.join([osp.abspath(p['rgb1_gen']),
+                        osp.abspath(p['msk1_gen']),
+                        osp.abspath(p['cstr_tmp']),
+                        osp.abspath(p['flow_gen']),
+                        osp.abspath(p['rgb2_gen']),
+                        osp.abspath(p['msk2_gen'])])
 
+        for sp in line.split(' ')[:2]:
+            assert osp.exists(sp), 'File not found:\n{}'.format(sp)
+        for sp in line.split(' ')[3:]:
+            if not osp.isdir(osp.dirname(sp)):
+                os.makedirs(osp.dirname(sp))
 
-                # Convert JPEG to PNG, if needed
-                im = np.array(Image.open(osp.join(root, d, f1)))
-                # check if the image is portrait
-                if im.shape[0] > im.shape[1]:
-                    im = im.transpose((1, 0, 2))
-                    mask = mask.transpose((1, 0))
-                    # transposing constraints
-                    cstr_path = osp.abspath(osp.join(cst_root, seq, f+'.txt'))
-                    lines = open(cstr_path).read().splitlines()
-                    nls = []
-                    for line in lines:
-                        if '\t' not in line:
-                            continue
-                        x1, y1, x2, y2 = line.split('\t')
-                        nls.append('\t'.join([y1, x1, y2, x2]))
-                    open(cstr_path, 'w').write('\n'.join([str(len(nls))]+nls))
+        arap_paths.append(line)
+        lmdb_paths.append(' '.join([line.split(' ')[i] for i in [0, 4, 3]]))
 
-                # fit background to the image size
-                bgim = fit_bg(bgim, im)
-                # add background
-                out1 = add_bg(im, mask, bgim, bgval=im1paths['bgval'])
-                # output
-                outdir = osp.join(rgb_root, seq)
-                if not osp.isdir(outdir):
-                    os.makedirs(outdir)
-                Image.fromarray(out1).save(osp.join(outdir, f+'.png'))
-                # =================
+        if len(arap_paths) > 5:
+            if proc is not None:
+                proc.join()
+            proc = Process(target=do_arap, args=(arap_paths,bgs))
+            proc.start()
+            print 'Start arap for: ', len(arap_paths)
+            arap_paths = []
+            bgs = []
 
-                bgs.append(bgim)
-
-                line =' '.join([osp.abspath(osp.join(rgb_root, seq, f+'.png')),
-                                osp.abspath(osp.join(msk_root, seq, f+'.png')),
-                                osp.abspath(osp.join(cst_root, seq, f+'.txt')),
-                                osp.abspath(osp.join(flo_root, seq, f+'.flo')),
-                                osp.abspath(osp.join(wco_root, seq, f+'.png')),
-                                osp.abspath(osp.join(wmk_root, seq, f+'.png'))])
-
-                for p in line.split(' ')[:2]:
-                    assert osp.exists(p), 'File not found:\n{}'.format(p)
-                for p in line.split(' ')[3:]:
-                    if not osp.isdir(osp.dirname(p)):
-                        os.makedirs(osp.dirname(p))
-
-                arap_paths.append(line)
-                lmdb_paths.append(' '.join([line.split(' ')[i] for i in [0, 4, 3]]))
-
-                if len(arap_paths) > 5:
-                    if proc is not None:
-                        proc.join()
-                    proc = Process(target=do_arap, args=(arap_paths,bgs))
-                    proc.start()
-                    print 'Start arap for: ', len(arap_paths)
-                    arap_paths = []
-                    bgs = []
-
-    
     # check sums
     out_paths = []
     for line in lmdb_paths:

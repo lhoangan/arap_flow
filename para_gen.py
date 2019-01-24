@@ -1,11 +1,7 @@
-import shutil
-import sys, re, time
-import argparse
-import numpy as np
-import random as rn
+import re, os, sys, time, numpy as np, random as rn, os.path as osp
+import argparse, shutil, logging
 from math import sqrt
 from PIL import Image
-import os, os.path as osp
 from multiprocessing import Process
 from subprocess import call
 
@@ -215,6 +211,7 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     assert status == 0, \
         'Deep matching exited with code {:d}. The command is \n{}'.format(status, cmd)
 
+
 def has_mask(msk1_path, msk2_path):
 
     try:
@@ -266,6 +263,13 @@ def preprocess(p):
         p['msk2_org'] = p['msk2_gen']
 
     return np.array(im1), np.array(mk1), np.array(im2), np.array(mk2)
+
+def cleanup(p):
+    logging.info('Cleaning up')
+    for k in p:
+        if '_org' not in k and osp.exists(p[k]):
+            logging.warning('Removing\n\t{}'.format(p[k]))
+            os.remove(p[k])
 
 def main(flags):
 
@@ -382,6 +386,7 @@ def main(flags):
         im1, mk1, im2, mk2 = preprocess(p)
 
         if not has_mask(p['msk1_org'], p['msk2_org']):
+            cleanup(p)
             continue
 
         run_matching(p['rgb1_org'], p['rgb2_org'],
@@ -399,6 +404,7 @@ def main(flags):
         # write back to file
         open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
         if len(cstrs) == 0:
+            cleanup(p)
             continue
 
         # Convert mask
@@ -451,7 +457,7 @@ def main(flags):
         arap_paths.append(line)
         lmdb_paths.append(' '.join([line.split(' ')[i] for i in [0, 4, 3]]))
 
-        if len(arap_paths) > 5:
+        if len(arap_paths) > 15:
             if proc is not None:
                 proc.join()
             proc = Process(target=do_arap, args=(arap_paths,bgs))
@@ -503,4 +509,5 @@ if __name__ == "__main__":
     parser.add_argument('--rm-tmp-cmd')
     parser.add_argument('--img-pattern')
     flags = parser.parse_args()
+    logging.basicConfig(filename='example.log',level=logging.DEBUG)
     main(flags)

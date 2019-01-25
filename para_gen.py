@@ -468,11 +468,14 @@ def main(flags):
             arap_paths = []
             bgs = []
 
+    # wait for all the threads to finish
+    proc.join()
+
     # check sums
     out_paths = []
     for line in lmdb_paths:
         all_good = True
-        for l in line.split('\t'):
+        for l in line.split(' '):
             if not osp.exists(l):
                 all_good = False
                 break

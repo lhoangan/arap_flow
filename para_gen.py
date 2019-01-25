@@ -211,6 +211,8 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     assert status == 0, \
         'Deep matching exited with code {:d}. The command is \n{}'.format(status, cmd)
 
+    print 'Done matching for ' + out_file
+
 
 def has_mask(msk1_path, msk2_path):
 
@@ -371,11 +373,11 @@ def main(flags):
 
     print '\t\t{:d} files [Done] | {:.3f} seconds'.format(len(all_paths), time.time() - begin)
 
+    all_paths = all_paths[:10]
 
-    for k in all_paths[0]:
-        print k, '|', all_paths[0][k]
+    for i, p in enumerate(all_paths):
 
-    for p in all_paths:
+        print '{:.3f}%'.format(float(i) * 100 / len(all_paths))
 
         # preparing for output
         for k in p:
@@ -455,9 +457,9 @@ def main(flags):
                 os.makedirs(osp.dirname(sp))
 
         arap_paths.append(line)
-        lmdb_paths.append(' '.join([line.split(' ')[i] for i in [0, 4, 3]]))
+        lmdb_paths.append(' '.join([line.split(' ')[l] for l in [0, 4, 3]]))
 
-        if len(arap_paths) > 15:
+        if len(arap_paths) > 7:
             if proc is not None:
                 proc.join()
             proc = Process(target=do_arap, args=(arap_paths,bgs))

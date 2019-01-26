@@ -27,6 +27,7 @@ fd = 1
 
 ARAP_BG = 255
 
+parser = argparse.ArgumentParser(description='Arguments for ARAP flow generation')
 
 #=============================================================================
 
@@ -132,7 +133,7 @@ def bg_gen(bg_dir, im1paths, im2paths, flow_root):
 
 
 def run_arap(path): #, progress):
-    cmd = '{} {:s}'.format(arap_bin, path)
+    cmd = '{} {:s}'.format(flags.arap_bin, path)
 
     #begin = time.time()
     status = call(cmd, shell=True)
@@ -177,7 +178,7 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     assert osp.exists(msk1), 'File not found: \n{}'.format(msk1)
     assert osp.exists(msk2), 'File not found: \n{}'.format(msk2)
 
-    cmd = './{} {} {} -nt 0 -out {} '.format(dm_bin, img1, img2, out_file)
+    cmd = './{} {} {} -nt 0 -out {} '.format(flags.dm_bin, img1, img2, out_file)
     # call the deep matching module from shell
     status = call(cmd, shell=True)
     assert status == 0, \
@@ -257,7 +258,7 @@ def cleanup(p):
             logging.warning('Removing\n\t{}'.format(p[k]))
             os.remove(p[k])
 
-def main(flags):
+def main():
 
     rgb_org = osp.join(input_root, orgcolor)
     msk_org = osp.join(input_root, orgmask)
@@ -329,7 +330,7 @@ def main(flags):
                 n = '{:0'+str(len(num.group(1)))+'d}'
 
                 # getting next frame according to frame distance fd
-                nxt = int(num.group(1))+fd
+                nxt = int(num.group(1))+flags.fd
                 f2 = f.replace(num.group(1), n.format(nxt))
                 # skipping if out of second frame
                 if not osp.exists(osp.join(rgb_org, seq, f2+ext)) or \
@@ -440,7 +441,7 @@ def main(flags):
         arap_paths.append(line)
         lmdb_paths.append(' '.join([line.split(' ')[l] for l in [0, 4, 3]]))
 
-        if len(arap_paths) > 7:
+        if len(arap_paths) > flags.narap:
             if proc is not None:
                 proc.join()
             proc = Process(target=do_arap, args=(arap_paths,bgs))
@@ -469,11 +470,34 @@ def main(flags):
 if __name__ == "__main__":
     # TODO check if rgb and mask images are in png format, if not convert them to png
     # TODO input if want to keep constraints and warped mask
-    parser = argparse.ArgumentParser(description='Argument for ARAP flow generation')
     parser.add_argument('--rm-cnstr')
     parser.add_argument('--rm-wmask')
     parser.add_argument('--rm-tmp-cmd')
     parser.add_argument('--img-pattern')
+    parser.add_argument('--gpu', type=int, default=0,
+            help='GPU id to be used, default=0')
+    parser.add_argument('--narap', type=int, default=7,
+            help='Number of buffered files to be run by ARAP on gpu; should be '
+            'balanced with deep matching running in CPU; default=7')
+    parser.add_argument('--size', default='1024, 768',
+            help='2-tuple of width and height to which all images are resized '
+            'to, default=1024,768')
+    parser.add_argument('--fd', type=int, default=1,
+            help='Positive integer indicating the distance between 2 frames to '
+            'generate optical flow; should not be larger than 10 for better '
+            'results, default=1 for consecutive frames')
+    parser.add_argument('--arap_bin', default='./arap-deform',
+            help='Path to built ARAP binary file to be run, default=./arap-deform')
+    parser.add_argument('--dm_bin', default='./dm',
+            help='Path to built deep matching binary file to be run, default=./dm')
     flags = parser.parse_args()
+
+
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(flags.gpu)
+    flags.size = eval(flags.size)
+    assert flags.fd > 0 and flags.fd < 20, 'Invalid fd number!'
+    assert osp.exists(flags.arap_bin), 'File not found ' + flags.arap_bin
+    assert osp.exists(flags.dm_bin), 'File not found ' + flags.dm_bin
+
     logging.basicConfig(filename='example.log',level=logging.DEBUG)
-    main(flags)
+    main()

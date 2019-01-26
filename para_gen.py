@@ -233,16 +233,28 @@ def scale_rotate(im_path, mk_path):
             'but given {:s} vs. {:s}'.format(str(im.size), str(mk.size))
 
     preprocessed = False
-    if max(im.size) > 1024:
-        r = 1024.0 / max(im.size)
-        im = im.resize((int(im.size[0]*r), int(im.size[1]*r)), Image.ANTIALIAS)
-        mk = mk.resize((int(mk.size[0]*r), int(mk.size[1]*r)), Image.ANTIALIAS)
-        preprocessed = True
 
     # check if the image is portrait, i.e. height > width
     if im.size[1] > im.size[0]:
         im = im.transpose(Image.TRANSPOSE)
         mk = mk.transpose(Image.TRANPOSE)
+        preprocessed = True
+
+    # make all images to the same size. TODO: passed in as argument
+    if im.size != (1024, 768):
+        r = max(1028.0 / im.size[0], 772.0 / im.size[1])
+        w, h = (np.array(im.size) * r).astype(np.int)
+        im = im.resize((w, h), Image.ANTIALIAS)
+        mk = mk.resize((w, h), Image.NEAREST)
+
+        left  = int(w/2) - 1024/2
+        upper = int(h/2) - 768/2
+        right = left + 1024
+        lower = upper + 768
+
+        im = im.crop((left, upper, right, lower))
+        mk = mk.crop((left, upper, right, lower))
+
         preprocessed = True
 
     return (preprocessed, im, mk)
@@ -373,7 +385,7 @@ def main(flags):
 
     print '\t\t{:d} files [Done] | {:.3f} seconds'.format(len(all_paths), time.time() - begin)
 
-    all_paths = all_paths[:10]
+    #all_paths = all_paths[:10]
 
     for i, p in enumerate(all_paths):
 

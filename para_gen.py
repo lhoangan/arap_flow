@@ -141,34 +141,6 @@ def run_arap(path): #, progress):
     #print '[{:.2f}% ] | Elapsed {:.3f}s'.format(progress*100, time.time() - begin)
     print 'Finish run_arap', path.split(' ')[0]
 
-# TODO strip all the input path trailing slash
-def arap_deform(rgb_root, msk_root, cst_root, flo_root, wco_root, wmk_root):
-
-    paths = []
-    # scan by constraints files since rgb_root contains more file than there really is
-    scan_root = cst_root
-    for root, dirs, files in os.walk(scan_root):
-        for f in files:
-            if '.txt' not in f:
-                continue
-            seq = root.replace(scan_root, '').strip(osp.sep) # strip form the slashes
-            paths[seq] = paths.get(seq, [])
-            fi = f.replace('.txt','.png') # filename for img
-            ff = f.replace('.txt','.flo') # filename for flow
-
-            line = '{} {} {} {} {} {}'.format(  osp.join(rgb_root, seq, fi),
-                                                osp.join(msk_root, seq, fi),
-                                                osp.join(cst_root, seq, f),
-                                                osp.join(flo_root, seq, ff),
-                                                osp.join(wco_root, seq, fi),
-                                                osp.join(wmk_root, seq, fi))
-            for p in line.split(' ')[:2]:
-                assert osp.exists(p), 'File not found:\n{}'.format(p)
-            for p in line.split(' ')[3:]:
-                if not osp.isdir(osp.dirname(p)):
-                    os.makedirs(osp.dirname(p))
-            paths[seq].append(line)
-
 def do_arap(paths, bgs):
 
     # create temporary list file to input to ARAP
@@ -324,9 +296,6 @@ def main(flags):
     tmp_paths = []
 
     begin = time.time()
-    #paths = matching(1, org_color_root , org_mask_root, constraint_root, im1paths['rgb_root'], im1paths['mask_root'], flow_root, im2paths['rgb_root'], im2paths['mask_root'])
-    #print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
-    #sys.stdout.flush()
 
     bgs = []
     proc = None
@@ -495,26 +464,6 @@ def main(flags):
             out_paths.append(line)
     open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(out_paths))
     return out_paths
-
-    ## TODO check if input images are jpg and convert to png
-    #print 'Converting original images',
-    #sys.stdout.flush()
-    #begin = time.time()
-    ##convert_rgb(org_color_root, im1paths['rgb_root'])
-    ##convert_mask(org_mask_root, im1paths['mask_root'])
-    #print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
-    #sys.stdout.flush()
-
-    print 'Image ARAP deformation',
-    sys.stdout.flush()
-    begin = time.time()
-    #arap_deform(im1paths['rgb_root'], im1paths['mask_root'],
-    #            constraint_root, flow_root,
-    #            im2paths['rgb_root'], im2paths['mask_root'])
-    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
-    print 'Adding static background',
-    lines = bg_gen(bg_dir, im1paths, im2paths, flow_root)
-
 
 
 if __name__ == "__main__":

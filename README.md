@@ -4,6 +4,21 @@ Flow Datasets for Videos in the Wild"
 
 ## Installation
 
+Download terra, change name to `terra`
+
+move it to the same level as Warp
+
+create folder build in Warp/API, `cd Warp/API; mkdir build`
+
+go to Warp/API, run `make`
+
+error: 
+
+src/main.cpp:3:10: fatal error: 'cuda_runtime.h' file not found
+#include <cuda_runtime.h>
+
+solution: export CUDA_HOME
+
 ### Opt
 https://github.com/niessner/Opt/blob/master/README.md
 
@@ -16,19 +31,22 @@ conda install -c statiskit clang
 
 for CUDA higher than 7.5 (tested with 9.0)
 use the newest version of terra
-(terra release)[https://github.com/zdevito/terra/releases]
+[terra release](https://github.com/zdevito/terra/releases)
 
 tested with anaconda clang 3.8.1, (here)[https://anaconda.org/statiskit/clang]
 `conda install -c statiskit clang `
 
-(LLVM release)[http://releases.llvm.org/download.html]
+[LLVM release](http://releases.llvm.org/download.html)
 Update environmental variable $PATH, $LD_LIBRARY_PATH, and $INCLUDE_PATH
 LLVM 5.0.0
 
 LLVM 6.0.0
 
-LLVM 7.0.0, (here)[https://anaconda.org/conda-forge/clang]
-`conda install -c conda-forge/label/gcc7 clang`
+LLVM 7.0
+conda install -c conda-forge/label/gcc7 clangdev
+
+conda install -c anaconda zlib
+put -lz to after -ltinfo
 
 
 for non-standard CUDA directories, update $CUDA_HOME (for Linux) and $CUDA_PATH (for Windows)

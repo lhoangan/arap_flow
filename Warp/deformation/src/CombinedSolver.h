@@ -270,7 +270,9 @@ public:
 
                         vec3f val = c0*b0 + c1*b1 + c2*b2;
                         if (ismask)
-                            result(x, y) = int(val > 0) * 255;
+                            if (val != vec3f(0, 0, 0))
+                                result(x, y) = 255;
+                            //result(x, y) = int(val > (vec3f *)0) * 255;
                         else
                             result(x, y) = val;
                     }

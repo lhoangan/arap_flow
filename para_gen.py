@@ -132,29 +132,28 @@ def bg_gen(bg_dir, im1paths, im2paths, flow_root):
     return lines
 
 
-def run_arap(path): #, progress):
-    cmd = '{} {:s}'.format(flags.arap_bin, path)
-
-    #begin = time.time()
-    status = call(cmd, shell=True)
-    assert status == 0, \
-        'ARAP exited with code {:d}. The command was \n{}'.format(status, cmd)
-    #print '[{:.2f}% ] | Elapsed {:.3f}s'.format(progress*100, time.time() - begin)
-    print 'Finish run_arap', path.split(' ')[0]
-
-def do_arap(paths, bgs):
+def do_arap(paths, bgs, gpu):
 
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
         os.makedirs('tmp')
+    fn = 'gpu-{:d}_{}'.format(gpu, str(time.time()).replace('.', '_'))
     try:
-        fn = str(time.time()).replace('.', '_')
         open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths))
         path = osp.abspath('tmp/{}.txt'.format(fn))
-        run_arap(path)
+
+        # run arap from command line
+        cmd = 'export CUDA_VISIBLE_DEVICES={:d} ; {} {}'.format(gpu, flags.arap_bin, path)
+
+        #begin = time.time()
+        status = call(cmd, shell=True)
+        assert status == 0, \
+            'ARAP exited with code {:d}. The command was \n{}'.format(status, cmd)
+        #print '[{:.2f}% ] | Elapsed {:.3f}s'.format(progress*100, time.time() - begin)
+        print 'Finish run_arap', path.split(' ')[0]
     finally:
         # clean up
-        shutil.rmtree('tmp')
+        os.remove('tmp/{}.txt'.format(fn))
 
     # add background
     for path, bg in zip(paths, bgs):
@@ -210,7 +209,7 @@ def scale_rotate(im_path, mk_path):
     # check if the image is portrait, i.e. height > width
     if im.size[1] > im.size[0]:
         im = im.transpose(Image.TRANSPOSE)
-        mk = mk.transpose(Image.TRANPOSE)
+        mk = mk.transpose(Image.TRANSPOSE)
         preprocessed = True
 
     # make all images to the same size. TODO: passed in as argument
@@ -414,8 +413,6 @@ def main():
             bg_paths.remove(bgpath)
 
         # fit background to the image size
-        bgim = fit_bg(bgim, im1)
-        # add background
         out1 = add_bg(im1, mask, bgim, bgval=im1paths['bgval'])
         # output
         if not osp.isdir(osp.dirname(p['rgb1_gen'])):
@@ -441,14 +438,22 @@ def main():
         arap_paths.append(line)
         lmdb_paths.append(' '.join([line.split(' ')[l] for l in [0, 4, 3]]))
 
+
         if len(arap_paths) > flags.narap:
             if proc is not None:
                 proc.join()
-            proc = Process(target=do_arap, args=(arap_paths,bgs))
-            proc.start()
-            print 'Start arap for: ', len(arap_paths)
-            arap_paths = []
-            bgs = []
+                npaths = len(arap_paths)
+                ngpus = len(flags.gpu)
+                d = npaths // ngpus
+                if npaths % ngpus > 0:
+                    d += 1
+                for i, gpu in enumerate(flags.gpu):
+                    paths = arap_paths[(i*d):min((i+1)*d, npaths)]
+                    proc = Process(target=do_arap, args=(paths, bgs, gpu))
+                    proc.start()
+                    print 'Start arap for: ', len(arap_paths)
+                arap_paths = []
+                bgs = []
 
     # wait for all the threads to finish
     proc.join()
@@ -465,6 +470,7 @@ def main():
             out_paths.append(line)
     open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(out_paths))
     return out_paths
+    shutil.rmtree('tmp')
 
 
 if __name__ == "__main__":
@@ -474,7 +480,7 @@ if __name__ == "__main__":
     parser.add_argument('--rm-wmask')
     parser.add_argument('--rm-tmp-cmd')
     parser.add_argument('--img-pattern')
-    parser.add_argument('--gpu', type=int, default=0,
+    parser.add_argument('--gpu', nargs='*', type=int, default=[0],
             help='GPU id to be used, default=0')
     parser.add_argument('--narap', type=int, default=7,
             help='Number of buffered files to be run by ARAP on gpu; should be '

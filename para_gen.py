@@ -2,7 +2,7 @@ import re, os, sys, time, numpy as np, random as rn, os.path as osp
 import argparse, shutil, logging
 from math import sqrt
 from PIL import Image
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 from subprocess import call
 
 arap_bin = '/home/hale/TrimBot/projects/ARAP_flow/Warp/deformation/image_warping'
@@ -132,12 +132,13 @@ def bg_gen(bg_dir, im1paths, im2paths, flow_root):
     return lines
 
 
-def do_arap(paths, bgs, gpu):
+def do_arap(paths, bgs, gpu, gpu_queue):
 
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
         os.makedirs('tmp')
     fn = 'gpu-{:d}_{}'.format(gpu, str(time.time()).replace('.', '_'))
+    print 'GPU ' , gpu , ' ' , len(paths) , ' files'
     try:
         open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths))
         path = osp.abspath('tmp/{}.txt'.format(fn))
@@ -163,6 +164,8 @@ def do_arap(paths, bgs, gpu):
         im = add_bg(im, mk, bg, bgval=0)
         Image.fromarray(im).save(pt)
 
+    gpu_queue.put(gpu)
+
 def valid_cnstr(x1, y1, x2, y2, msk1, msk2):
 
     dist = sqrt((x2-x1)**2 + (y2-y1)**2)
@@ -177,7 +180,7 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     assert osp.exists(msk1), 'File not found: \n{}'.format(msk1)
     assert osp.exists(msk2), 'File not found: \n{}'.format(msk2)
 
-    cmd = './{} {} {} -nt 0 -out {} -ngh_rad 10 '.format(flags.dm_bin, img1, img2, out_file)
+    cmd = './{} {} {} -nt 0 -out {} -ngh_rad 100 '.format(flags.dm_bin, img1, img2, out_file)
     # call the deep matching module from shell
     status = call(cmd, shell=True)
     assert status == 0, \
@@ -355,7 +358,11 @@ def main():
 
     #all_paths = all_paths[:10]
 
-    procs = []
+    procs = {}
+    ngpus = len(flags.gpu)
+    gpu_queue = Queue(ngpus)
+    for g in flags.gpu:
+        gpu_queue.put(g)
     for i, p in enumerate(all_paths):
 
         print '{:.3f}%'.format(float(i) * 100 / len(all_paths))
@@ -439,28 +446,37 @@ def main():
         arap_paths.append(line)
         lmdb_paths.append(' '.join([line.split(' ')[l] for l in [0, 4, 3]]))
 
-
-        if len(arap_paths) > flags.narap:
-            if procs is not None:
-                for proc in procs:
-                    proc.join()
-            npaths = len(arap_paths)
-            ngpus = len(flags.gpu)
-            d = npaths // ngpus
-            if npaths % ngpus > 0:
-                d += 1
-            for i, gpu in enumerate(flags.gpu):
-                paths = arap_paths[(i*d):min((i+1)*d, npaths)]
-                proc = Process(target=do_arap, args=(paths, bgs, gpu))
-                proc.start()
-                procs.append(proc)
+        if not gpu_queue.empty():
+            gpu = gpu_queue.get()
+            proc = Process(target=do_arap, args=(arap_paths, bgs, gpu, gpu_queue))
+            proc.start()
+            procs[gpu] = proc
             arap_paths = []
             bgs = []
 
+
+
+        #if len(arap_paths) > flags.narap:
+        #    if procs is not None:
+        #        for proc in procs:
+        #            proc.join()
+        #    npaths = len(arap_paths)
+        #    ngpus = len(flags.gpu)
+        #    d = npaths // ngpus
+        #    if npaths % ngpus > 0:
+        #        d += 1
+        #    for i, gpu in enumerate(flags.gpu):
+        #        paths = arap_paths[(i*d):min((i+1)*d, npaths)]
+        #        proc = Process(target=do_arap, args=(paths, bgs, gpu))
+        #        proc.start()
+        #        procs.append(proc)
+        #    arap_paths = []
+        #    bgs = []
+
     # wait for all the threads to finish
-    if procs is not None:
-        for proc in procs:
-            proc.join()
+    if len(procs) > 0:
+        for k in procs:
+            procs[k].join()
 
     # check sums
     out_paths = []

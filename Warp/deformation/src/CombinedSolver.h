@@ -269,10 +269,8 @@ public:
                         t2.x, t2.y, 1.0f, (float)x, (float)y, &b0, &b1, &b2)) {
 
                         vec3f val = c0*b0 + c1*b1 + c2*b2;
-                        if (ismask)
-                            if (val != vec3f(0, 0, 0))
-                                result(x, y) = 255;
-                            //result(x, y) = int(val > (vec3f *)0) * 255;
+                        if (ismask && val != vec3f(0, 0, 0))
+                            result(x, y) = 255;
                         else
                             result(x, y) = val;
                     }

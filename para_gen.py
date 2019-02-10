@@ -8,10 +8,10 @@ from subprocess import call
 arap_bin = '/home/hale/TrimBot/projects/ARAP_flow/Warp/deformation/image_warping'
 dm_bin = 'deepmatching/deepmatching_1.2.2_c++/deepmatching-static'
 
-input_root = 'data/ImgNetVID/'
-output_root = 'data/ImgNetVID/fd1'
+input_root = 'data/DAVIS/'
+output_root = 'data/DAVIS/fd1'
 #bg_dir = '/home/hale/TrimBot/projects/flickr_downloader/img_downloads'
-bg_dir = '/home/hale/TrimBot/projects/optflow/naturedata'
+bg_dir = 'data/naturedata'
 
 orgcolor = 'orgRGB'
 orgmask = 'orgMasks'
@@ -177,7 +177,7 @@ def run_matching(img1, img2, msk1, msk2, out_file):
     assert osp.exists(msk1), 'File not found: \n{}'.format(msk1)
     assert osp.exists(msk2), 'File not found: \n{}'.format(msk2)
 
-    cmd = './{} {} {} -nt 0 -out {} '.format(flags.dm_bin, img1, img2, out_file)
+    cmd = './{} {} {} -nt 0 -out {} -ngh_rad 10 '.format(flags.dm_bin, img1, img2, out_file)
     # call the deep matching module from shell
     status = call(cmd, shell=True)
     assert status == 0, \
@@ -298,7 +298,6 @@ def main():
     begin = time.time()
 
     bgs = []
-    proc = None
     all_paths = []
     lmdb_paths = []
     arap_paths = []
@@ -356,6 +355,7 @@ def main():
 
     #all_paths = all_paths[:10]
 
+    procs = []
     for i, p in enumerate(all_paths):
 
         print '{:.3f}%'.format(float(i) * 100 / len(all_paths))
@@ -413,6 +413,7 @@ def main():
             bg_paths.remove(bgpath)
 
         # fit background to the image size
+        bgim = fit_bg(bgim, im1)
         out1 = add_bg(im1, mask, bgim, bgval=im1paths['bgval'])
         # output
         if not osp.isdir(osp.dirname(p['rgb1_gen'])):
@@ -440,23 +441,26 @@ def main():
 
 
         if len(arap_paths) > flags.narap:
-            if proc is not None:
-                proc.join()
-                npaths = len(arap_paths)
-                ngpus = len(flags.gpu)
-                d = npaths // ngpus
-                if npaths % ngpus > 0:
-                    d += 1
-                for i, gpu in enumerate(flags.gpu):
-                    paths = arap_paths[(i*d):min((i+1)*d, npaths)]
-                    proc = Process(target=do_arap, args=(paths, bgs, gpu))
-                    proc.start()
-                    print 'Start arap for: ', len(arap_paths)
-                arap_paths = []
-                bgs = []
+            if procs is not None:
+                for proc in procs:
+                    proc.join()
+            npaths = len(arap_paths)
+            ngpus = len(flags.gpu)
+            d = npaths // ngpus
+            if npaths % ngpus > 0:
+                d += 1
+            for i, gpu in enumerate(flags.gpu):
+                paths = arap_paths[(i*d):min((i+1)*d, npaths)]
+                proc = Process(target=do_arap, args=(paths, bgs, gpu))
+                proc.start()
+                procs.append(proc)
+            arap_paths = []
+            bgs = []
 
     # wait for all the threads to finish
-    proc.join()
+    if procs is not None:
+        for proc in procs:
+            proc.join()
 
     # check sums
     out_paths = []

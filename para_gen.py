@@ -4,6 +4,8 @@ from math import sqrt
 from PIL import Image
 from multiprocessing import Process, Queue
 from subprocess import call
+import sintel_io
+
 
 arap_bin = '/home/hale/TrimBot/projects/ARAP_flow/Warp/deformation/image_warping'
 dm_bin = 'deepmatching/deepmatching_1.2.2_c++/deepmatching-static'
@@ -45,7 +47,7 @@ def fit_bg(bg, im):
     sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
     return bg[sy:(sy+imh), sx:(sx+imw), :]
 
-def add_bg(im, mk, bgim, bgval):
+def add_bg(im, mk, bgim, bgval=0):
     assert mk.shape == im.shape[:-1], 'Sizes mismatch mask and image '+\
             str(mk.shape) + ' vs. ' + str(im.shape[:-1])
     assert bgim.shape == im.shape, 'Sizes mismatch background and image '+\
@@ -131,8 +133,41 @@ def bg_gen(bg_dir, im1paths, im2paths, flow_root):
     print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
     return lines
 
+def flatten(arap_seg_paths):
+    for arap_path, seg_paths in arap_seg_paths:
+        assert len(seg_paths) > 0, 'Something wrong with seg_paths'
+        flow_path, rgb2_path, msk2_path = seg_paths[0].split(' ')[-3:]
+        flow_im = np.dstack(sintel_io.flow_read(flow_path))
+        rgb2_im = np.array(Image.open(rgb2_path))
+        msk2_im = np.array(Image.open(msk2_path))
+        mask = msk2_im == 0
+        for i in range(1, len(seg_paths)):
+            flow_path, rgb2_path, msk2_path = seg_paths[i].split(' ')[-3:]
+            flow_ = np.dstack(sintel_io.flow_read(flow_path))
+            rgb2_ = np.array(Image.open(rgb2_path))
+            msk2_ = np.array(Image.open(msk2_path))
 
-def do_arap(paths, bgs, gpu, gpu_queue):
+            flow_im += flow_ * mask
+            rgb2_im += rgb2_ * mask
+            msk2_im += msk2_ * mask
+
+            # os.remove(flow_path)
+            # os.remove(rgb2_path)
+            # os.remove(msk2_path)
+
+        # os.remove(flow_path)
+        # os.remove(rgb2.path)
+        # os.remove(msk2.path)
+
+        # output
+        sintel_io.flow_write(arap_path.split(' ')[-3], flow_im)
+        Image.fromarray(rgb2_im).save(arap_path.split(' ')[-2])
+        Image.fromarray(msk2_im).save(arap_path.split(' ')[-1])
+
+    return [entry[0] for entry in arap_seg_paths]
+
+
+def do_arap(paths, bgs, gpu, gpu_queue, arap_seg_paths):
 
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
@@ -156,12 +191,16 @@ def do_arap(paths, bgs, gpu, gpu_queue):
         # clean up
         os.remove('tmp/{}.txt'.format(fn))
 
+    # flatten all layers
+    if len(arap_seg_paths) > 0:
+        paths = flatten(arap_seg_paths)
+
     # add background
     for path, bg in zip(paths, bgs):
         pt, mk = path.split(' ')[-2:]
         im = np.array(Image.open(pt))
         mk = np.array(Image.open(mk))
-        im = add_bg(im, mk, bg, bgval=0)
+        im = add_bg(im, mk, bg)
         Image.fromarray(im).save(pt)
 
     gpu_queue.put(gpu)
@@ -260,6 +299,28 @@ def cleanup(p):
             logging.warning('Removing\n\t{}'.format(p[k]))
             os.remove(p[k])
 
+def replace_ext(dict_path, seg_num, keep_orgs=[]):
+
+    dict_out = dict()
+    for k in dict_path:
+        fn, ext = osp.splitext(dict_path[k])
+        if k not in keep_orgs:
+            dict_out[k] = fn + '_seg{:d}.{:s}'.format(seg_num, ext)
+        else:
+            dict_out[k] = dict_path[k]
+
+    return dict_out
+
+def make_arap_path(p):
+
+    arap_path =' '.join([osp.abspath(p['rgb1_gen']),
+                        osp.abspath(p['msk1_gen']),
+                        osp.abspath(p['cstr_tmp']),
+                        osp.abspath(p['flow_gen']),
+                        osp.abspath(p['rgb2_gen']),
+                        osp.abspath(p['msk2_gen'])])
+    return arap_path
+
 def main():
 
     rgb_org = osp.join(input_root, orgcolor)
@@ -302,8 +363,6 @@ def main():
 
     bgs = []
     all_paths = []
-    lmdb_paths = []
-    arap_paths = []
     # TODO have the file pattern input from argument
     reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
 
@@ -358,6 +417,9 @@ def main():
 
     #all_paths = all_paths[:10]
 
+    lmdb_paths = []
+    arap_paths = []
+    arap_seg_paths = []
     procs = {}
     ngpus = len(flags.gpu)
     gpu_queue = Queue(ngpus)
@@ -366,6 +428,8 @@ def main():
     for i, p in enumerate(all_paths):
 
         print '{:.3f}%'.format(float(i) * 100 / len(all_paths))
+        arap_path = make_arap_path(p)
+        lmdb_paths.append(' '.join([arap_path.split(' ')[l] for l in [0, 4, 3]]))
 
         # preparing for output
         for k in p:
@@ -386,23 +450,18 @@ def main():
         # Load mask1 and mask2 images
         lines = open(p['cstr_tmp']).read().splitlines()
         cstrs = []
+        valids = [] # valid segment number in case of multiple segment
         # check the constraints
         for line in lines:
             x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
             if valid_cnstr(x1, y1, x2, y2, mk1, mk2):
                 cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
+                valids.append(mk1[y1, x1])
         # write back to file
         open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
         if len(cstrs) == 0:
             cleanup(p)
             continue
-
-        # Convert mask
-        if not osp.isdir(osp.dirname(p['msk1_gen'])):
-            os.makedirs(osp.dirname(p['msk1_gen']))
-        mask = np.zeros_like(mk1, dtype=np.uint8)
-        mask[mk1==0] = ARAP_BG # TODO mask with each object segment separately
-        Image.fromarray(mask).save(p['msk1_gen'])
 
         # load background
         while True:
@@ -421,37 +480,54 @@ def main():
 
         # fit background to the image size
         bgim = fit_bg(bgim, im1)
-        out1 = add_bg(im1, mask, bgim, bgval=im1paths['bgval'])
-        # output
+        out1 = add_bg(im1, mk1, bgim)
+
+        # output to file
+        bgs.append(bgim)
         if not osp.isdir(osp.dirname(p['rgb1_gen'])):
             os.makedirs(osp.dirname(p['rgb1_gen']))
         Image.fromarray(out1).save(p['rgb1_gen'])
-        # =================
 
-        bgs.append(bgim)
+        # Convert mask
+        if not osp.isdir(osp.dirname(p['msk1_gen'])):
+            os.makedirs(osp.dirname(p['msk1_gen']))
 
-        line =' '.join([osp.abspath(p['rgb1_gen']),
-                        osp.abspath(p['msk1_gen']),
-                        osp.abspath(p['cstr_tmp']),
-                        osp.abspath(p['flow_gen']),
-                        osp.abspath(p['rgb2_gen']),
-                        osp.abspath(p['msk2_gen'])])
+        seg_paths = None
+        if flags.mult_seg is None or not flags.mult_seg:
+            mask = np.zeros_like(mk1, dtype=np.uint8)
+            mask[mk1==0] = ARAP_BG # TODO mask with each object segment separately
+            Image.fromarray(mask).save(p['msk1_gen'])
+        else:
+            seg_paths = []
+            for s in np.unique(valids): # only check the valid segment (segment with at least 1 constraint)
+                if s == 0:
+                    continue
+                mask = np.zeros_like(mk1, dtype=np.uint8) + ARAP_BG
+                mask[mk1 == s] = 0
+                p_ = replace_ext(p, s, keep_orgs=['rgb1_gen'])
+                Image.fromarray(mask).save(p_['msk1_gen'])
+                seg_paths = make_arap_path(p_)
+            arap_seg_paths.append((arap_path, seg_paths))
 
-        for sp in line.split(' ')[:2]:
+
+        for sp in arap_path.split(' ')[:2]:
             assert osp.exists(sp), 'File not found:\n{}'.format(sp)
-        for sp in line.split(' ')[3:]:
+        for sp in arap_path.split(' ')[3:]:
             if not osp.isdir(osp.dirname(sp)):
                 os.makedirs(osp.dirname(sp))
 
-        arap_paths.append(line)
-        lmdb_paths.append(' '.join([line.split(' ')[l] for l in [0, 4, 3]]))
+        if seg_paths is None:
+            arap_paths.append(arap_path)
+        else:
+            arap_paths += seg_paths
 
         if not gpu_queue.empty():
             gpu = gpu_queue.get()
-            proc = Process(target=do_arap, args=(arap_paths, bgs, gpu, gpu_queue))
+            proc = Process(target=do_arap, args=(arap_paths, bgs, gpu, gpu_queue, arap_seg_paths))
             proc.start()
             procs[gpu] = proc
             arap_paths = []
+            arap_seg_paths = []
             bgs = []
 
 

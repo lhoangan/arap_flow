@@ -141,6 +141,11 @@ def flatten(arap_seg_paths):
         rgb2_im = np.array(Image.open(rgb2_path))
         msk2_im = np.array(Image.open(msk2_path))
         mask = msk2_im == 0
+
+        os.remove(flow_path)
+        os.remove(rgb2_path)
+        os.remove(msk2_path)
+
         for i in range(1, len(seg_paths)):
             flow_path, rgb2_path, msk2_path = seg_paths[i].split(' ')[-3:]
             flow_ = np.dstack(sintel_io.flow_read(flow_path))
@@ -154,10 +159,6 @@ def flatten(arap_seg_paths):
             os.remove(flow_path)
             os.remove(rgb2_path)
             os.remove(msk2_path)
-
-        os.remove(flow_path)
-        os.remove(rgb2_path)
-        os.remove(msk2_path)
 
         # output
         sintel_io.flow_write(arap_path.split(' ')[-3], flow_im)
@@ -246,7 +247,11 @@ def scale_rotate(im_path, mk_path):
     assert im.size == mk.size, 'Image and mask must be of the same size' \
             'but given {:s} vs. {:s}'.format(str(im.size), str(mk.size))
 
+    ext = '{} {}'.format(osp.splitext(im_path)[1], osp.splitext(mk_path)[1])
+
     preprocessed = False
+    if 'JPG' in ext.upper() or 'JPEG' in ext.upper():
+        preprocessed = True
 
     # check if the image is portrait, i.e. height > width
     if im.size[1] > im.size[0]:
@@ -255,16 +260,17 @@ def scale_rotate(im_path, mk_path):
         preprocessed = True
 
     # make all images to the same size. TODO: passed in as argument
-    if im.size != (1024, 768):
-        r = max(1028.0 / im.size[0], 772.0 / im.size[1])
+    if flags.size is not None and im.size != flags.size:
+        r = max(float(flags.size[0]+10) / float(im.size[0]),
+                float(flags.size[1]+10)/ float(im.size[1]))
         w, h = (np.array(im.size) * r).astype(np.int)
         im = im.resize((w, h), Image.ANTIALIAS)
         mk = mk.resize((w, h), Image.NEAREST)
 
-        left  = int(w/2) - 1024/2
-        upper = int(h/2) - 768/2
-        right = left + 1024
-        lower = upper + 768
+        left  = int(w/2) - flags.size[0]/2
+        upper = int(h/2) - flags.size[1]/2
+        right = left + flags.size[0]
+        lower = upper + flags.size[1]
 
         im = im.crop((left, upper, right, lower))
         mk = mk.crop((left, upper, right, lower))
@@ -436,7 +442,6 @@ def main():
             if not osp.isdir(osp.dirname(p[k])):
                 os.makedirs(osp.dirname(p[k]))
 
-
         im1, mk1, im2, mk2 = preprocess(p)
 
         if not has_mask(p['msk1_org'], p['msk2_org']):
@@ -601,9 +606,10 @@ if __name__ == "__main__":
     parser.add_argument('--narap', type=int, default=7,
             help='Number of buffered files to be run by ARAP on gpu; should be '
             'balanced with deep matching running in CPU; default=7')
-    parser.add_argument('--size', default='1024, 768',
-            help='2-tuple of width and height to which all images are resized '
-            'to, default=1024,768')
+    parser.add_argument('--size', nargs=2, default=None,
+            help='2-tuple of [width] [space] [height] (in this order) '
+            'to which all images are resized. '
+            'Omit to keep original dimensions of images.')
     parser.add_argument('--fd', type=int, default=1,
             help='Positive integer indicating the distance between 2 frames to '
             'generate optical flow; should not be larger than 10 for better '
@@ -614,9 +620,9 @@ if __name__ == "__main__":
             help='Path to built deep matching binary file to be run, default=./dm')
     flags = parser.parse_args()
 
-
     os.environ['CUDA_VISIBLE_DEVICES'] = str(flags.gpu)
-    flags.size = eval(flags.size)
+    if flags.size is not None:
+        flags.size = tuple([int(s) for s in flags.size])
     assert flags.fd > 0 and flags.fd < 20, 'Invalid fd number!'
     assert osp.exists(flags.arap_bin), 'File not found ' + flags.arap_bin
     assert osp.exists(flags.dm_bin), 'File not found ' + flags.dm_bin

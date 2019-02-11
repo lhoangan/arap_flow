@@ -147,22 +147,22 @@ def flatten(arap_seg_paths):
             rgb2_ = np.array(Image.open(rgb2_path))
             msk2_ = np.array(Image.open(msk2_path))
 
-            flow_im += flow_ * mask
-            rgb2_im += rgb2_ * mask
+            flow_im += flow_ * mask[..., None]
+            rgb2_im += rgb2_ * mask[..., None]
             msk2_im += msk2_ * mask
 
-            # os.remove(flow_path)
-            # os.remove(rgb2_path)
-            # os.remove(msk2_path)
+            os.remove(flow_path)
+            os.remove(rgb2_path)
+            os.remove(msk2_path)
 
-        # os.remove(flow_path)
-        # os.remove(rgb2.path)
-        # os.remove(msk2.path)
+        os.remove(flow_path)
+        os.remove(rgb2_path)
+        os.remove(msk2_path)
 
         # output
         sintel_io.flow_write(arap_path.split(' ')[-3], flow_im)
         Image.fromarray(rgb2_im).save(arap_path.split(' ')[-2])
-        Image.fromarray(msk2_im).save(arap_path.split(' ')[-1])
+        Image.fromarray(msk2_im.astype(np.uint8)).save(arap_path.split(' ')[-1])
 
     return [entry[0] for entry in arap_seg_paths]
 
@@ -305,7 +305,7 @@ def replace_ext(dict_path, seg_num, keep_orgs=[]):
     for k in dict_path:
         fn, ext = osp.splitext(dict_path[k])
         if k not in keep_orgs:
-            dict_out[k] = fn + '_seg{:d}.{:s}'.format(seg_num, ext)
+            dict_out[k] = fn + '_seg{:d}{:s}'.format(seg_num, ext)
         else:
             dict_out[k] = dict_path[k]
 
@@ -448,11 +448,11 @@ def main():
 
         # Filter constraints to  belong in the same segment type and within radius 60px
         # Load mask1 and mask2 images
-        lines = open(p['cstr_tmp']).read().splitlines()
+        cstr_lines = open(p['cstr_tmp']).read().splitlines()
         cstrs = []
         valids = [] # valid segment number in case of multiple segment
         # check the constraints
-        for line in lines:
+        for line in cstr_lines:
             x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
             if valid_cnstr(x1, y1, x2, y2, mk1, mk2):
                 cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
@@ -493,7 +493,7 @@ def main():
             os.makedirs(osp.dirname(p['msk1_gen']))
 
         seg_paths = None
-        if flags.mult_seg is None or not flags.mult_seg:
+        if not flags.multseg:
             mask = np.zeros_like(mk1, dtype=np.uint8)
             mask[mk1==0] = ARAP_BG # TODO mask with each object segment separately
             Image.fromarray(mask).save(p['msk1_gen'])
@@ -502,11 +502,23 @@ def main():
             for s in np.unique(valids): # only check the valid segment (segment with at least 1 constraint)
                 if s == 0:
                     continue
+                p_ = replace_ext(p, s, keep_orgs=['rgb1_gen', 'cstr_tmp'])
+
+                # output mask per segment
                 mask = np.zeros_like(mk1, dtype=np.uint8) + ARAP_BG
                 mask[mk1 == s] = 0
-                p_ = replace_ext(p, s, keep_orgs=['rgb1_gen'])
                 Image.fromarray(mask).save(p_['msk1_gen'])
-                seg_paths = make_arap_path(p_)
+
+                # output constraints per segment
+                cstr_segs = []
+                for line in cstr_lines:
+                    x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
+                    if mk1[y1, x1] == s:
+                        cstr_segs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
+                assert len(cstr_segs) > 0, 'Segment {:s} has no constraint'.format(s)
+
+                # output constraints per segment
+                seg_paths.append(make_arap_path(p_))
             arap_seg_paths.append((arap_path, seg_paths))
 
 
@@ -520,6 +532,12 @@ def main():
             arap_paths.append(arap_path)
         else:
             arap_paths += seg_paths
+
+
+        #do_arap(arap_paths, bgs, 0, arap_seg_paths)
+        #arap_paths = []
+        #arap_seg_paths = []
+        #bgs = []
 
         if not gpu_queue.empty():
             gpu = gpu_queue.get()
@@ -578,6 +596,8 @@ if __name__ == "__main__":
     parser.add_argument('--img-pattern')
     parser.add_argument('--gpu', nargs='*', type=int, default=[0],
             help='GPU id to be used, default=0')
+    parser.add_argument('--multseg', action='store_true', default=False,
+            help='if each object segment is treated separately')
     parser.add_argument('--narap', type=int, default=7,
             help='Number of buffered files to be run by ARAP on gpu; should be '
             'balanced with deep matching running in CPU; default=7')

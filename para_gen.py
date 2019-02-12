@@ -142,6 +142,9 @@ def flatten(arap_seg_paths):
         msk2_im = np.array(Image.open(msk2_path))
         mask = msk2_im == 0
 
+        if len(rgb2_im.shape) == 2:
+            rgb2_im = rgb2_im[..., None]
+
         os.remove(flow_path)
         os.remove(rgb2_path)
         os.remove(msk2_path)
@@ -152,9 +155,12 @@ def flatten(arap_seg_paths):
             rgb2_ = np.array(Image.open(rgb2_path))
             msk2_ = np.array(Image.open(msk2_path))
 
-            flow_im += flow_ * mask[..., None]
-            rgb2_im += rgb2_ * mask[..., None]
-            msk2_im += msk2_ * mask
+            if len(rgb2_.shape) == 2:
+                rgb2_ = rgb2_[..., None]
+
+            flow_im = flow_im + flow_ * mask[..., None]
+            rgb2_im = rgb2_im + rgb2_ * mask[..., None]
+            msk2_im = msk2_im + msk2_ * mask
 
             os.remove(flow_path)
             os.remove(rgb2_path)
@@ -207,6 +213,10 @@ def do_arap(paths, bgs, gpu, gpu_queue, arap_seg_paths):
     gpu_queue.put(gpu)
 
 def valid_cnstr(x1, y1, x2, y2, msk1, msk2):
+
+    if x1 >= msk1.shape[1] or x2 >= msk2.shape[1] or \
+            y1 >= msk1.shape[0] or y2 >= msk2.shape[0]:
+        return False
 
     dist = sqrt((x2-x1)**2 + (y2-y1)**2)
     return  dist < 60 and dist > 0 and msk1[y1, x1] > 0 and msk1[y1, x1] == msk2[y2, x2]
@@ -417,7 +427,8 @@ def main():
                 entry['rgb2_org'] = osp.abspath(osp.join(rgb_org, seq, f2+ext))
                 entry['msk2_org'] = osp.abspath(osp.join(msk_org, seq, f2+'.png'))
 
-                all_paths.append(entry)
+                if not flags.resume or not osp.exists(entry['flow_gen']):
+                    all_paths.append(entry)
 
     print '\t\t{:d} files [Done] | {:.3f} seconds'.format(len(all_paths), time.time() - begin)
 
@@ -459,6 +470,7 @@ def main():
         # check the constraints
         for line in cstr_lines:
             x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
+
             if valid_cnstr(x1, y1, x2, y2, mk1, mk2):
                 cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
                 valids.append(mk1[y1, x1])
@@ -603,6 +615,8 @@ if __name__ == "__main__":
             help='GPU id to be used, default=0')
     parser.add_argument('--multseg', action='store_true', default=False,
             help='if each object segment is treated separately')
+    parser.add_argument('--resume', action='store_true', default=False,
+            help='To skip the images that have *.flo finished.')
     parser.add_argument('--narap', type=int, default=7,
             help='Number of buffered files to be run by ARAP on gpu; should be '
             'balanced with deep matching running in CPU; default=7')

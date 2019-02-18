@@ -140,7 +140,6 @@ def flatten(arap_seg_paths):
         flow_im = np.dstack(sintel_io.flow_read(flow_path))
         rgb2_im = np.array(Image.open(rgb2_path))
         msk2_im = np.array(Image.open(msk2_path))
-        mask = msk2_im == 0
 
         if len(rgb2_im.shape) == 2:
             rgb2_im = rgb2_im[..., None]
@@ -154,13 +153,15 @@ def flatten(arap_seg_paths):
             flow_ = np.dstack(sintel_io.flow_read(flow_path))
             rgb2_ = np.array(Image.open(rgb2_path))
             msk2_ = np.array(Image.open(msk2_path))
+            msk_ob = msk2_ != 0
+            msk_bg = msk2_ == 0
 
             if len(rgb2_.shape) == 2:
                 rgb2_ = rgb2_[..., None]
 
-            flow_im = flow_im + flow_ * mask[..., None]
-            rgb2_im = rgb2_im + rgb2_ * mask[..., None]
-            msk2_im = msk2_im + msk2_ * mask
+            flow_im = flow_im*msk_bg[..., None] + flow_ * msk_ob[..., None]
+            rgb2_im = rgb2_im*msk_bg[..., None] + rgb2_ * msk_ob[..., None]
+            msk2_im = msk2_im*msk_bg + msk2_ * msk_ob
 
             os.remove(flow_path)
             os.remove(rgb2_path)
@@ -607,6 +608,10 @@ def main():
 if __name__ == "__main__":
     # TODO check if rgb and mask images are in png format, if not convert them to png
     # TODO input if want to keep constraints and warped mask
+    parser.add_argument('--input', type=str, required=True,
+            help='Path to input root')
+    parser.add_argument('--output', type=str, required=True,
+            help='Path to output root')
     parser.add_argument('--rm-cnstr')
     parser.add_argument('--rm-wmask')
     parser.add_argument('--rm-tmp-cmd')
@@ -640,6 +645,9 @@ if __name__ == "__main__":
     assert flags.fd > 0 and flags.fd < 20, 'Invalid fd number!'
     assert osp.exists(flags.arap_bin), 'File not found ' + flags.arap_bin
     assert osp.exists(flags.dm_bin), 'File not found ' + flags.dm_bin
+
+    input_root = flags.input.rstrip(osp.sep)
+    output_root = flags.output.rstrip(osp.sep)
 
     logging.basicConfig(filename='example.log',level=logging.DEBUG)
     main()

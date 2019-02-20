@@ -1,3 +1,6 @@
+tmp/
+
+*.pyc
 .*.swo
 .*.swp
 deepmatching_1.2.2.zip

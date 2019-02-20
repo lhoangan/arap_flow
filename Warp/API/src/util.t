@@ -1,6 +1,7 @@
 local S = require("std")
 require("precision")
 local util = {}
+local verbosePTX = _opt_verbosity > 2
 
 util.C = terralib.includecstring [[
 #include <stdio.h>
@@ -14,8 +15,103 @@ util.C = terralib.includecstring [[
 ]]
 local C = util.C
 
+--[[ rPrint(struct, [limit], [indent])   Recursively print arbitrary data. 
+    Set limit (default 100) to stanch infinite loops.
+    Indents tables as [KEY] VALUE, nested tables as [KEY] [KEY]...[KEY] VALUE
+    Set indent ("") to prefix each line:    Mytable [KEY] [KEY]...[KEY] VALUE
+--]]
+function util.rPrint(s, l, i) -- recursive Print (structure, limit, indent)
+    l = (l) or 100; i = i or "";    -- default item limit, indent string
+    local ts = type(s);
+    if (l<1) then print (i,ts," *snip* "); return end;
+    if (ts ~= "table") then print (i,ts,s); return end
+    print (i,ts);           -- print "table"
+    for k,v in pairs(s) do  -- print "[KEY] VALUE"
+        util.rPrint(v, l-1, i.."\t["..tostring(k).."]");
+    end
+end 
+
+function table.keys(tab)
+    local result = terralib.newlist()
+    for k,_ in pairs(tab) do
+        result:insert(k)
+    end
+    return result
+end
+
 local cuda_compute_version = 30
 local libdevice = terralib.cudahome..string.format("/nvvm/libdevice/libdevice.compute_%d.10.bc",cuda_compute_version)
+
+local terra toYesNo(pred : int32)
+    if pred ~= 0 then return "Yes" else return  "No" end
+end
+
+local terra toEnDisabled(pred : int32)
+    if pred ~= 0 then return "Enabled" else return  "Disabled" end
+end
+
+local terra printCudaDeviceProperties()
+    var dev : int32
+    var driverVersion = 0
+    var runtimeVersion = 0;
+    C.cudaGetDevice(&dev)
+    var deviceProp : C.cudaDeviceProp
+    C.cudaGetDeviceProperties(&deviceProp, dev)
+
+    C.printf("\nDevice %d: \"%s\"\n", dev, deviceProp.name)
+
+    C.cudaDriverGetVersion(&driverVersion)
+    C.cudaRuntimeGetVersion(&runtimeVersion)
+    C.printf("  CUDA Driver Version / Runtime Version          %d.%d / %d.%d\n", driverVersion/1000, (driverVersion%100)/10, runtimeVersion/1000, (runtimeVersion%100)/10);
+    C.printf("  CUDA Capability Major/Minor version number:    %d.%d\n", deviceProp.major, deviceProp.minor)
+
+    C.printf("  Total amount of global memory:                 %.0f MBytes (%llu bytes)\n",
+            [float](deviceProp.totalGlobalMem)/1048576.0f, [uint64](deviceProp.totalGlobalMem))
+    -- TODO: compute # "cores"
+    C.printf("  (%2d) Multiprocessors\n",deviceProp.multiProcessorCount)
+    C.printf("  GPU Max Clock rate:                            %.0f MHz (%0.2f GHz)\n", deviceProp.clockRate * 1e-3f, deviceProp.clockRate * 1e-6f);
+
+    C.printf("  Memory Clock rate:                             %.0f Mhz\n", deviceProp.memoryClockRate * 1e-3f);
+    C.printf("  Memory Bus Width:                              %d-bit\n",   deviceProp.memoryBusWidth);
+
+    if (deviceProp.l2CacheSize ~= 0) then
+        C.printf("  L2 Cache Size:                                 %d bytes\n", deviceProp.l2CacheSize);
+    end
+
+    C.printf("  Maximum Texture Dimension Size (x,y,z)         1D=(%d), 2D=(%d, %d), 3D=(%d, %d, %d)\n",
+           deviceProp.maxTexture1D   , deviceProp.maxTexture2D[0], deviceProp.maxTexture2D[1],
+           deviceProp.maxTexture3D[0], deviceProp.maxTexture3D[1], deviceProp.maxTexture3D[2]);
+    C.printf("  Maximum Layered 1D Texture Size, (num) layers  1D=(%d), %d layers\n",
+           deviceProp.maxTexture1DLayered[0], deviceProp.maxTexture1DLayered[1]);
+    C.printf("  Maximum Layered 2D Texture Size, (num) layers  2D=(%d, %d), %d layers\n",
+           deviceProp.maxTexture2DLayered[0], deviceProp.maxTexture2DLayered[1], deviceProp.maxTexture2DLayered[2]);
+
+    C.printf("  Total amount of constant memory:               %lu bytes\n", deviceProp.totalConstMem);
+    C.printf("  Total amount of shared memory per block:       %lu bytes\n", deviceProp.sharedMemPerBlock);
+    C.printf("  Total number of registers available per block: %d\n", deviceProp.regsPerBlock);
+    C.printf("  Warp size:                                     %d\n", deviceProp.warpSize);
+    C.printf("  Maximum number of threads per multiprocessor:  %d\n", deviceProp.maxThreadsPerMultiProcessor);
+    C.printf("  Maximum number of threads per block:           %d\n", deviceProp.maxThreadsPerBlock);
+    C.printf("  Max dimension size of a thread block (x,y,z): (%d, %d, %d)\n",
+           deviceProp.maxThreadsDim[0],
+           deviceProp.maxThreadsDim[1],
+           deviceProp.maxThreadsDim[2]);
+    C.printf("  Max dimension size of a grid size    (x,y,z): (%d, %d, %d)\n",
+           deviceProp.maxGridSize[0],
+           deviceProp.maxGridSize[1],
+           deviceProp.maxGridSize[2]);
+    C.printf("  Maximum memory pitch:                          %lu bytes\n", deviceProp.memPitch);
+    C.printf("  Texture alignment:                             %lu bytes\n", deviceProp.textureAlignment);
+    C.printf("  Concurrent copy and kernel execution:          %s with %d copy engine(s)\n", toYesNo(deviceProp.deviceOverlap), deviceProp.asyncEngineCount);
+    C.printf("  Run time limit on kernels:                     %s\n", toYesNo(deviceProp.kernelExecTimeoutEnabled))
+    C.printf("  Integrated GPU sharing Host Memory:            %s\n", toYesNo(deviceProp.integrated))
+    C.printf("  Support host page-locked memory mapping:       %s\n", toYesNo(deviceProp.canMapHostMemory))
+    C.printf("  Alignment requirement for Surfaces:            %s\n", toYesNo(deviceProp.surfaceAlignment))
+    C.printf("  Device has ECC support:                        %s\n", toEnDisabled(deviceProp.ECCEnabled))
+    C.printf("  Device supports Unified Addressing (UVA):      %s\n", toYesNo(deviceProp.unifiedAddressing))
+    C.printf("  Device PCI Domain ID / Bus ID / location ID:   %d / %d / %d\n", deviceProp.pciDomainID, deviceProp.pciBusID, deviceProp.pciDeviceID);
+end
+
 
 local pascalOrBetterGPU = false 
 
@@ -29,6 +125,9 @@ end
 local computeC = deviceMajorComputeCapability()
 if computeC >= 6 then
     pascalOrBetterGPU = true
+end
+if _opt_verbosity > 1 then
+    printCudaDeviceProperties()
 end
 if opt_float == double and (not pascalOrBetterGPU) then
     print("Warning: double precision on GPUs with compute capability < 6.0 (before Pascal) have no native double precision atomics, so we must use slow software emulation instead. This has a large performance impact on graph energies.")
@@ -768,8 +867,10 @@ function util.makeGPUFunctions(problemSpec, PlanData, delegate, names)
             end
         end
     end
-    
-    local kernels = terralib.cudacompile(kernelFunctions, false)
+    if verbosePTX then
+        print("Compiling kernels!")
+    end
+    local kernels = terralib.cudacompile(kernelFunctions, verbosePTX, 30)
     
     -- step 2: generate wrapper functions around each named thing
     local grouplaunchers = {}
@@ -800,6 +901,28 @@ function util.makeGPUFunctions(problemSpec, PlanData, delegate, names)
         grouplaunchers[name] = fn 
     end
     return grouplaunchers
+end
+
+
+function util.reportGPUMemoryUse()
+    local terra reportMem()
+        var free_byte : C.size_t
+        var total_byte : C.size_t
+
+        cd(C.cudaMemGetInfo( &free_byte, &total_byte ))
+
+
+        var free_db = [double](free_byte)
+
+        var total_db = [double](total_byte)
+
+        var used_db = total_db - free_db ;
+
+        C.printf("GPU memory usage: used = %f, free = %f MB, total = %f MB\n",
+
+            used_db/1024.0/1024.0, free_db/1024.0/1024.0, total_db/1024.0/1024.0);
+    end
+    reportMem()
 end
 
 return util

@@ -1,4 +1,6 @@
 import re, os, sys, time, numpy as np, random as rn, os.path as osp
+from math import pi, radians
+from skimage.transform import warp, AffineTransform
 import argparse, shutil, logging
 from math import sqrt
 from PIL import Image
@@ -28,24 +30,74 @@ wMask_dir = 'wMasks'
 fd = 1
 
 ARAP_BG = 255
+WARP_CONST = -12345
 
 parser = argparse.ArgumentParser(description='Arguments for ARAP flow generation')
 
 #=============================================================================
 
-def fit_bg(bg, im):
+def param_gen(k, mu, sigma, a, b, p):
+
+    gamma = rn.gauss(mu, sigma)
+    beta = np.random.binomial(1, p)
+    return beta * max(min(np.sign(gamma) * abs(gamma)**k, b), a) + (1-beta)*mu
+
+
+def warp_bg(bg):
+
+    X, Y = np.meshgrid(np.arange(0, bg.shape[1]), np.arange(0, bg.shape[0]))
+    grid = np.dstack((X, Y))
+
+    tx = param_gen(4, 0, 1.3, -40, 40, 1)
+    ty = param_gen(4, 0, 1.3, -40, 40, 1)
+    an = param_gen(2, 0, 1.3, -10, 10, 0.3) # in degree
+    sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+    sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+
+    tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
+    grid_ = warp(grid.astype(np.float32), tform.inverse, order=3, mode='constant', cval=WARP_CONST)
+    bg2 = warp(bg.astype(np.float32), tform.inverse, order=3)
+    bgfl = grid_ - grid
+
+    assert bgfl.shape[:-1] == bg2.shape[:-1], 'Warped BG and Flow has different size '\
+            'is {} vs. {}'.format(str(bgfl.shape[:-1]), str(bg2.shape[:-1]))
+
+    return bg2.astype(np.uint8), bgfl
+
+
+    #    if (fl < -1234).sum() == 0:
+    #        break
+    #assert counter < 10, 'Failed!'
+
+def fit_bg(bg, im, static=True):
     imh, imw = im.shape[:2]
     bgh, bgw = bg.shape[:2]
     bgim = Image.fromarray(bg)
 
     hmax = max(bgh, imh)
     wmax = max(bgw, imw)
-    r = rn.uniform(1, 2) * max(float(hmax)/bgh, float(wmax)/bgw)
+    # scale the background to at least 2 times larger than the image
+    r = rn.uniform(2, 2.5) * max(float(hmax)/bgh, float(wmax)/bgw)
     bgim = bgim.resize((int(bgw*r), int(bgh*r)), Image.ANTIALIAS)
     bg = np.array(bgim)
-    # random crop the background to the image
+
+    bg2 = bg
+    bgfl = np.zeros((bg.shape[0], bg.shape[1], 2))
+    # random position to crop
     sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
-    return bg[sy:(sy+imh), sx:(sx+imw), :]
+
+    if not static:
+        bg2, bgfl = warp_bg(bg)
+        # position to center crop
+        sy, sx = bg.shape[0]/2-imh/2, bg.shape[1]/2-imw/2
+
+    # cropping
+    bg = bg[sy:(sy+imh), sx:(sx+imw), :]
+    bg2 = bg2[sy:(sy+imh), sx:(sx+imw), :]
+    bgfl = bgfl[sy:(sy+imh), sx:(sx+imw), :]
+
+    assert (bgfl < WARP_CONST/2).sum() == 0, 'BG flow is contaminated'
+    return bg, bg2, bgfl
 
 def add_bg(im, mk, bgim, bgval=0):
     assert mk.shape == im.shape[:-1], 'Sizes mismatch mask and image '+\
@@ -208,7 +260,7 @@ def do_arap(paths, bgs, gpu, gpu_queue, arap_seg_paths):
         pt, mk = path.split(' ')[-2:]
         im = np.array(Image.open(pt))
         mk = np.array(Image.open(mk))
-        im = add_bg(im, mk, bg)
+        im = add_bg(im, mk, bg[0])
         Image.fromarray(im).save(pt)
 
     gpu_queue.put(gpu)
@@ -497,11 +549,11 @@ def main():
             bg_paths.remove(bgpath)
 
         # fit background to the image size
-        bgim = fit_bg(bgim, im1)
+        bgim, bgim2, bgflo = fit_bg(bgim, im1)
         out1 = add_bg(im1, mk1, bgim)
 
         # output to file
-        bgs.append(bgim)
+        bgs.append((bgim2, bgflo))
         if not osp.isdir(osp.dirname(p['rgb1_gen'])):
             os.makedirs(osp.dirname(p['rgb1_gen']))
         Image.fromarray(out1).save(p['rgb1_gen'])

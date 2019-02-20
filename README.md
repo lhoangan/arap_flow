@@ -55,6 +55,27 @@ insert flag `-ltinfo` alongside each instance of `-lpthread` or `-pthread`
 maybe install libtinfo if necessary. Refered from (here)[https://github.com/halide/Halide/issues/1112]
 
 
+## Usage
+
+`python para_gen.py  --multseg --input data/DAVIS --output data/DAVIS/test --fd 2`
+
+Flags:
+- input: (required) path to input root, with orgRGB and orgMask directories
+    - Masks with zero for background, and >0 for objects
+- output: (required) path to output root, 5 folders will be created:
+    - inpRGB: first RGB frame of the ground truth pair
+    - inpMasks: first frame mask
+        - Mask with zero for objects and >0 for background
+    - Flow: output Flow
+    - wRGB: warped RGB
+    - wMasks: warped Masks
+        - Mask for zero for background and >0 for object
+- multseg: treat each segment separatenly
+- gpu [0 1 2 3...] : gpu id to be used
+- resume: skip images with \*.flo exists in output/Flow
+- fd: frame distance, 1 by default
+
+
 
 
 ## Pipeline

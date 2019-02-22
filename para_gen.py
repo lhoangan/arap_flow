@@ -514,8 +514,31 @@ def main():
     for g in flags.gpu:
         gpu_queue.put(g)
     for i, p in enumerate(all_paths):
-
         print '{:.3f}%'.format(float(i) * 100 / len(all_paths))
+        run_1image(p, lmdb_paths, procs, gpu_queue, bgs, arap_paths, arap_seg_paths, tmp_paths, bg_paths)
+
+    # wait for all the threads to finish
+    if len(procs) > 0:
+        for k in procs:
+            procs[k].join()
+
+    # check sums
+    out_paths = []
+    for line in lmdb_paths:
+        all_good = True
+        for l in line.split(' '):
+            if not osp.exists(l):
+                all_good = False
+                break
+        if all_good:
+            out_paths.append(line)
+    open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(out_paths))
+    return out_paths
+    shutil.rmtree('tmp')
+
+
+
+def run_1image(p, lmdb_paths, procs, gpu_queue, bgs, arap_paths, arap_seg_paths, tmp_paths, bg_paths):
         arap_path = make_arap_path(p)
         lmdb_paths.append(' '.join([arap_path.split(' ')[l] for l in [0, 4, 3]]))
 
@@ -528,7 +551,7 @@ def main():
 
         if not has_mask(p['msk1_org'], p['msk2_org']):
             cleanup(p)
-            continue
+            return
 
         run_matching(p['rgb1_org'], p['rgb2_org'],
                     p['msk1_org'], p['msk2_org'], p['cstr_tmp'])
@@ -549,7 +572,7 @@ def main():
         open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
         if len(cstrs) == 0:
             cleanup(p)
-            continue
+            return
 
         # load background
         while True:
@@ -632,11 +655,9 @@ def main():
             proc = Process(target=do_arap, args=(arap_paths, bgs, gpu, gpu_queue, arap_seg_paths))
             proc.start()
             procs[gpu] = proc
-            arap_paths = []
-            arap_seg_paths = []
-            bgs = []
-
-
+            arap_paths[:] = []
+            arap_seg_paths[:] = []
+            bgs[:] = []
 
         #if len(arap_paths) > flags.narap:
         #    if procs is not None:
@@ -654,25 +675,6 @@ def main():
         #        procs.append(proc)
         #    arap_paths = []
         #    bgs = []
-
-    # wait for all the threads to finish
-    if len(procs) > 0:
-        for k in procs:
-            procs[k].join()
-
-    # check sums
-    out_paths = []
-    for line in lmdb_paths:
-        all_good = True
-        for l in line.split(' '):
-            if not osp.exists(l):
-                all_good = False
-                break
-        if all_good:
-            out_paths.append(line)
-    open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(out_paths))
-    return out_paths
-    shutil.rmtree('tmp')
 
 
 if __name__ == "__main__":

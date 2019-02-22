@@ -3,6 +3,7 @@ import numpy as np, random as rn
 from skimage.transform import warp, AffineTransform
 import matplotlib.pyplot as plt
 from PIL import Image
+import time
 
 def convert(flow):
     UNKNOWN_FLOW_THRESH = 1e9
@@ -144,49 +145,91 @@ def param_gen(k, mu, sigma, a, b, p):
     beta = np.random.binomial(1, p)
     return beta * max(min(np.sign(gamma) * abs(gamma)**k, b), a) + (1-beta)*mu
 
-def warp_bg(bg):
+def warp_bg(w, h):
     # assuming that bg is landscape and already fit to image
 
     # scale the image to 2xlargest translation, then crop it back after warping
-    w, h = bg.size
+    #w, h = bg.size
     #r =  float(min(bg.size)+2*max_t) / min(bg.size)
-    r = 2
-    bg = np.array(bg.resize((int(w*r), int(h*r)), Image.ANTIALIAS))
+    r = rn.uniform(2, 3)
+    #bg = np.array(bg.resize((int(w*r), int(h*r)), Image.ANTIALIAS))
+    bgw = int(w*r)
+    bgh = int(h*r)
 
-    X, Y = np.meshgrid(np.arange(0, bg.shape[1]), np.arange(0, bg.shape[0]))
+    X, Y = np.meshgrid(np.arange(0, bgw), np.arange(0, bgh))
     gr = np.dstack((X, Y))
 
+    tx = param_gen(4, 0, 1.3, -40, 40, 1)
+    ty = param_gen(4, 0, 1.3, -40, 40, 1)
+    an = param_gen(2, 0, 1.3, -10, 10, 0.3) # in degree
+    sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+    sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
 
-    counter = 0
-    while (True):
-        tx = param_gen(4, 0, 1.3, -40, 40, 1)
-        ty = param_gen(4, 0, 1.3, -40, 40, 1)
-        an = param_gen(2, 0, 1.3, -10, 10, 0.3) # in degree
-        sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
-        sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+    tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
+    gr_ = warp(gr.astype(np.float32), tform.inverse, order=3, mode='constant', cval=-12345)
+    #bg_ = warp(bg.astype(np.float32), tform.inverse, order=3)[h/2:h/2+h, w/2:w/2+w,:]
+    fl = (gr_ - gr)
 
-        tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
-        gr_ = warp(gr.astype(np.float32), tform.inverse, order=3, mode='constant', cval=-12345)
-        bg_ = warp(bg.astype(np.float32), tform.inverse, order=3)[h/2:h/2+h, w/2:w/2+w,:]
-        fl = (gr_ - gr)[h/2:h/2+h,w/2:w/2+w,:]
 
-        if (fl < -1234).sum() == 0:
+    mask = np.logical_and(gr_[...,0] > -1234, gr_[...,1] > -1234)
+    #maskc =  mask.sum(axis=0) >= h # showing which column can accommodate h
+    #maskr =  mask.sum(axis=1) >= w # showing which row can accommodate w
+
+    csy = np.cumsum(mask, axis=0)
+    csx = np.cumsum(mask, axis=1)
+
+    idx = np.logical_and(csy > h, csx > w, np.cumsum(csx, axis=0) > (h*w))
+    ys, xs = np.where(idx==True)
+
+
+    #try:
+    #    x = min(np.where(np.cumsum(maskc) >= h)[0])
+    #    y = min(np.where(np.cumsum(maskr) >= w)[0])
+    #except:
+    #    import pdb
+    #    pdb.set_trace()
+
+    #x  = min(np.where(maskc >= h)[0])
+    #y  = min(np.where(maskr >= w)[0])
+
+    #ph = maskc[x-h] # possible h
+    #pw = maskr[y-w] # possible w
+
+    for y, x in zip(ys, xs):
+        fl = fl[y-h:y, x-w:x, :]
+        if (fl[...,0] < -1234).sum() == 0 and (fl[...,1] < -1234).sum() == 0:
             break
-        else:
-            plt.imshow(convert(fl)), plt.show()
-            import pdb
-            pdb.set_trace()
-            counter += 1
-        print counter
-        assert counter < 10, 'Failed!'
+            ##import pdb
+            ##pdb.set_trace()
+            ##plt.imshow(convert(fl)), plt.show()
+            ##return 0
+    else:
+        import pdb
+        pdb.set_trace()
+        print 'Width: {:d} | Height: {:d} | x: {:d} | y: {:d} | Ratio: {:.4f} | tx: {:.4f} | ty: {:.4f} | an: {:.4f} | sx: {:.4f} | sy: {:.4f}'.format(w, h, x, y, r, tx, ty, an, sx, sy)
+        return 0
+    return 1
 
-    assert fl.shape[:-1] == bg_.shape[:-1], 'Warped BG and Flow has different size '\
-            'is {} vs. {}'.format(str(fl.shape[:-1]), str(bg_.shape[:-1]))
 
-    print 'Min: {:f} | Max: {:f}'.format(fl.min(), fl.max())
-    return fl, bg_.astype(np.uint8)
+#        print counter
+#        assert counter < 10, 'Failed!'
+#
+#    assert fl.shape[:-1] == bg_.shape[:-1], 'Warped BG and Flow has different size '\
+#            'is {} vs. {}'.format(str(fl.shape[:-1]), str(bg_.shape[:-1]))
+#
+#    print 'Min: {:f} | Max: {:f}'.format(fl.min(), fl.max())
+#    return fl, bg_.astype(np.uint8)
 
-bg = Image.open('/hddstore/hale/naturedata/nature/JPEGImages_4/selfie/90.png')
-fl, bg_ = warp_bg(bg)
 
-plt.imshow(bg), plt.figure(), plt.imshow(convert(fl)), plt.figure(), plt.imshow(bg_), plt.show()
+counter = 0
+begin = time.time()
+for i in range(999999999):
+    if i % 100 == 0:
+        print 'Status: i = {:d} | Counter = {:d} | Time per image = {:f}s'.format(i, counter, (time.time()-begin)/100)
+        begin = time.time()
+    w = rn.randint(800, 1500)
+    h = rn.randint(500, w-100)
+    counter += warp_bg(w, h)#1200, 800)
+
+
+#plt.imshow(bg), plt.figure(), plt.imshow(convert(fl)), plt.figure(), plt.imshow(bg_), plt.show()

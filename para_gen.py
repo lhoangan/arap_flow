@@ -1,5 +1,5 @@
 import re, os, sys, time, numpy as np, random as rn, os.path as osp
-from math import pi, radians
+from math import radians
 from skimage.transform import warp, AffineTransform
 import argparse, shutil, logging
 from math import sqrt
@@ -86,17 +86,35 @@ def fit_bg(bg, im, static=True):
     # random position to crop
     sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
 
-    if not static:
+    counter = 0
+    while not static:
         bg2, bgfl = warp_bg(bg)
-        # position to center crop
-        sy, sx = bg.shape[0]/2-imh/2, bg.shape[1]/2-imw/2
+
+        mask = np.logical_and(bgfl[...,0] > -1234, bgfl[...,1] > -1234)
+
+        csy = np.cumsum(mask, axis=0)
+        csx = np.cumsum(mask, axis=1)
+
+        idx = np.logical_and(csy > imh, csx > imw, np.cumsum(csx, axis=0) > (imh*imw))
+        ys, xs = np.where(idx==True)
+
+        # get the pair of x, y that gives no contamination from warping
+        for y, x in zip(ys, xs):
+            if (bgfl[y-imh:y, x-imw:x, :] < -1234).sum() == 0:
+                sy = y-imh
+                sx = x-imw
+                break
+        else:
+            assert counter < 10, 'Timeout'
+            counter += 1
+            continue
+        break
 
     # cropping
     bg = bg[sy:(sy+imh), sx:(sx+imw), :]
     bg2 = bg2[sy:(sy+imh), sx:(sx+imw), :]
     bgfl = bgfl[sy:(sy+imh), sx:(sx+imw), :]
 
-    assert (bgfl < WARP_CONST/2).sum() == 0, 'BG flow is contaminated'
     return bg, bg2, bgfl
 
 def add_bg(im, mk, bgim, bgval=0):

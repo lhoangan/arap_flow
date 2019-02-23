@@ -43,31 +43,84 @@ def param_gen(k, mu, sigma, a, b, p):
     return beta * max(min(np.sign(gamma) * abs(gamma)**k, b), a) + (1-beta)*mu
 
 
-def warp_bg(bg):
+def warp_bg(bg, w, h):
 
     X, Y = np.meshgrid(np.arange(0, bg.shape[1]), np.arange(0, bg.shape[0]))
+    X -= int(bg.shape[1] / 2)
+    Y -= int(bg.shape[0] / 2)
     grid = np.dstack((X, Y))
 
-    tx = param_gen(4, 0, 1.3, -40, 40, 1)
-    ty = param_gen(4, 0, 1.3, -40, 40, 1)
-    an = param_gen(2, 0, 1.3, -10, 10, 0.3) # in degree
-    sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
-    sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+    while True:
 
-    tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
-    grid_ = warp(grid.astype(np.float32), tform.inverse, order=3, mode='constant', cval=WARP_CONST)
-    bg2 = warp(bg.astype(np.float32), tform.inverse, order=3)
-    bgfl = grid_ - grid
+        tx = param_gen(4, 0, 1.3, -40, 40, 1)
+        ty = param_gen(4, 0, 1.3, -40, 40, 1)
+        an = param_gen(2, 0, 1.3, -10, 10, 0.3) # in degree
+        sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+        sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
 
-    assert bgfl.shape[:-1] == bg2.shape[:-1], 'Warped BG and Flow has different size '\
-            'is {} vs. {}'.format(str(bgfl.shape[:-1]), str(bg2.shape[:-1]))
+        tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
+        grid_ = warp(grid.astype(np.float32), tform.inverse, order=1, mode='constant', cval=WARP_CONST)
+        bg2 = warp(bg.astype(np.float32), tform.inverse, order=1)
+        bgfl = grid_ - grid
 
-    return bg2.astype(np.uint8), bgfl
+        assert bgfl.shape[:-1] == bg2.shape[:-1], 'Warped BG and Flow has different size '\
+                'is {} vs. {}'.format(str(bgfl.shape[:-1]), str(bg2.shape[:-1]))
+
+        # cropping from invalid regions
+        # getting the available regions
+        mask = np.logical_and(  grid_[...,0] > WARP_CONST/10,
+                                grid_[...,1] > WARP_CONST/10,
+                                np.logical_or(  grid_[...,0] != 0,
+                                                grid_[...,0] != 0))
+        csy = np.cumsum(mask, axis=0)
+        csx = np.cumsum(mask, axis=1)
+        idx = np.logical_and(csy > h+5, csx > w+5,
+                             np.cumsum(csx, axis=0) > ((h+5)*(w+5)))
+        ys, xs = np.where(idx==True)
+
+        # get the pair of x, y that gives no contamination from warping
+        for y, x in zip(ys, xs):
+            tmp = grid_[y-h:y,x-w:x,:]
+            if (tmp < WARP_CONST/10).sum() == 0 and \
+                np.all(tmp==(0.,0.),axis=2).sum() == 0:
+                sy = y-h
+                sx = x-w
+                fl = bgfl[y-h:y,x-w:x,:]
+                break
+
+        if fl.min() > -100 and fl.max() < 100:
+            break
+
+    return  bg[y-h:y,x-w:x,:], bg2[y-h:y,x-w:x,:].astype(np.uint8), fl
 
 
-    #    if (fl < -1234).sum() == 0:
-    #        break
-    #assert counter < 10, 'Failed!'
+def prepare_bg(bg, target_size, static=True):
+    '''
+        target_size: 2-tuple of target [height, width] in this order
+    '''
+    imh, imw = target_size
+    bgh, bgw = bg.shape[:2]
+    bgim = Image.fromarray(bg)
+
+    hmax = max(bgh, imh)
+    wmax = max(bgw, imw)
+    # scale the background to at least 2 times larger than the image
+    r = rn.uniform(2, 2.5) * max(float(hmax)/bgh, float(wmax)/bgw)
+    bgim = bgim.resize((int(bgw*r), int(bgh*r)), Image.ANTIALIAS)
+    bg = np.array(bgim)
+
+    if not static:
+        bg, bg2, bgfl = warp_bg(bg, imw, imh)
+    else:
+        # random position to crop
+        sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
+        # cropping
+        bg = bg[sy:(sy+imh), sx:(sx+imw), :]
+        bg2 = bg
+        bgfl = np.zeros((bg.shape[0], bg.shape[1], 2))
+
+    return bg, bg2, bgfl
+
 
 def fit_bg(bg, im, static=True):
     imh, imw = im.shape[:2]
@@ -81,39 +134,15 @@ def fit_bg(bg, im, static=True):
     bgim = bgim.resize((int(bgw*r), int(bgh*r)), Image.ANTIALIAS)
     bg = np.array(bgim)
 
-    bg2 = bg
-    bgfl = np.zeros((bg.shape[0], bg.shape[1], 2))
-    # random position to crop
-    sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
-
-    counter = 0
-    while not static:
-        bg2, bgfl = warp_bg(bg)
-
-        mask = np.logical_and(bgfl[...,0] > -1234, bgfl[...,1] > -1234)
-
-        csy = np.cumsum(mask, axis=0)
-        csx = np.cumsum(mask, axis=1)
-
-        idx = np.logical_and(csy > imh, csx > imw, np.cumsum(csx, axis=0) > (imh*imw))
-        ys, xs = np.where(idx==True)
-
-        # get the pair of x, y that gives no contamination from warping
-        for y, x in zip(ys, xs):
-            if (bgfl[y-imh:y, x-imw:x, :] < -1234).sum() == 0:
-                sy = y-imh
-                sx = x-imw
-                break
-        else:
-            assert counter < 10, 'Timeout'
-            counter += 1
-            continue
-        break
-
-    # cropping
-    bg = bg[sy:(sy+imh), sx:(sx+imw), :]
-    bg2 = bg2[sy:(sy+imh), sx:(sx+imw), :]
-    bgfl = bgfl[sy:(sy+imh), sx:(sx+imw), :]
+    if not static:
+        bg, bg2, bgfl = warp_bg(bg, imw, imh)
+    else:
+        # random position to crop
+        sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
+        # cropping
+        bg = bg[sy:(sy+imh), sx:(sx+imw), :]
+        bg2 = bg
+        bgfl = np.zeros((bg.shape[0], bg.shape[1], 2))
 
     return bg, bg2, bgfl
 
@@ -245,7 +274,7 @@ def flatten(arap_seg_paths):
     return [entry[0] for entry in arap_seg_paths]
 
 
-def do_arap(paths, bgs, gpu, gpu_queue, arap_seg_paths):
+def do_arap(paths, gpu, gpu_queue, arap_seg_paths=[], bgs=[]):
 
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
@@ -274,13 +303,18 @@ def do_arap(paths, bgs, gpu, gpu_queue, arap_seg_paths):
         paths = flatten(arap_seg_paths)
 
     # add background
+    # if len(bgs) == 0, the loop would exit immediately all by itself
     for path, bg in zip(paths, bgs):
-        pt, mk = path.split(' ')[-2:]
+        fl, pt, mk = path.split(' ')[-3:]
         im = np.array(Image.open(pt))
         mk = np.array(Image.open(mk))
         im = add_bg(im, mk, bg[0])
         Image.fromarray(im).save(pt)
+        flo = np.dstack(sintel_io.flow_read(fl))
+        flo = add_bg(flo, bg[2], bg[1])
+        sintel_io.flow_write(fl, flo)
 
+    # free the gpu
     gpu_queue.put(gpu)
 
 def valid_cnstr(x1, y1, x2, y2, msk1, msk2):
@@ -341,7 +375,9 @@ def scale_rotate(im_path, mk_path):
         preprocessed = True
 
     # make all images to the same size. TODO: passed in as argument
-    if flags.size is not None and im.size != flags.size:
+    if flags.size is None:
+        flags.size = im.size
+    if im.size != flags.size:
         r = max(float(flags.size[0]+10) / float(im.size[0]),
                 float(flags.size[1]+10)/ float(im.size[1]))
         w, h = (np.array(im.size) * r).astype(np.int)

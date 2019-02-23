@@ -58,6 +58,7 @@ maybe install libtinfo if necessary. Refered from (here)[https://github.com/hali
 ## Usage
 
 `python para_gen.py  --multseg --input data/DAVIS --output data/DAVIS/test --fd 2`
+`python para_gen.py --gpu 0 1 2 3 --input data/DAVIS/ --output data/DAVIS/fd3 --fd 3 --size 854 480 --multseg  2>&1 | tee DAVIS2.log`
 
 Flags:
 - input: (required) path to input root, with orgRGB and orgMask directories
@@ -74,6 +75,7 @@ Flags:
 - gpu [0 1 2 3...] : gpu id to be used
 - resume: skip images with \*.flo exists in output/Flow
 - fd: frame distance, 1 by default
+- size [width] [height] : one size to scale all images to, required
 
 
 

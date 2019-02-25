@@ -620,6 +620,10 @@ def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, r
                 # loading data from entry
                 # pasting onto to the background # TODO
                 # saving to file
+                im1 = np.array(Image.open(entry['rgb1_gen']))
+                mk1 = np.array(Image.open(entry['msk1_gen']))
+                path_segments.append((im1, mk1, entry))
+                print 'Found sequence and frame exists' + str(entry)
                 continue
 
             # if not exists
@@ -853,9 +857,6 @@ def main():
 
 def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
 
-    arap_path = make_arap_path(p)
-    lmdb_paths.append(' '.join([arap_path.split(' ')[l] for l in [0, 4, 3]]))
-
     # preparing for output
     for k in p:
         if not osp.isdir(osp.dirname(p[k])):
@@ -896,8 +897,11 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
     if not flags.multseg:
         mask = np.zeros_like(mk1, dtype=np.uint8)
         mask[mk1==0] = ARAP_BG
+        p['msk1_gen'] = p['msk1_gen'].replace('.png', '_seg.png')
         Image.fromarray(mask).save(p['msk1_gen'])
+        arap_path = make_arap_path(p)
     else:
+        arap_path = make_arap_path(p)
         seg_paths = []
         for s in np.unique(valids): # only check the valid segment (segment with at least 1 constraint)
             if s == 0:
@@ -922,6 +926,7 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
         arap_seg_paths.append((arap_path, seg_paths))
 
 
+    lmdb_paths.append(' '.join([arap_path.split(' ')[l] for l in [0, 4, 3]]))
     for sp in arap_path.split(' ')[:2]:
         assert osp.exists(sp), 'File not found:\n{}'.format(sp)
     for sp in arap_path.split(' ')[3:]:

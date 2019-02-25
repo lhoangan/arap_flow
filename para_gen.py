@@ -249,7 +249,6 @@ def flatten(arap_seg_paths):
 
         for i in range(1, len(seg_paths)):
             _, msk1_path, _, flow_path, rgb2_path, msk2_path = seg_paths[i].split(' ')
-            #flow_path, rgb2_path, msk2_path = seg_paths[i].split(' ')[-3:]
             msk1_ob = np.array(Image.open(msk1_path)) == 0
             flow_ = np.dstack(sintel_io.flow_read(flow_path))
             rgb2_ = np.array(Image.open(rgb2_path))
@@ -257,7 +256,7 @@ def flatten(arap_seg_paths):
             msk2_ob = msk2_ != 0
 
             if len(rgb2_.shape) == 2:
-                rgb2_ = rgb2_[..., None]
+                rgb2_ = np.dstack((rgb2_,rgb2_,rgb2_))
 
             flow_im[msk1_ob] = flow_[msk1_ob]
             rgb2_im[msk2_ob] = rgb2_[msk2_ob]

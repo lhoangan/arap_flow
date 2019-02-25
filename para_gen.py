@@ -484,6 +484,184 @@ def make_arap_path(p):
                         osp.abspath(p['msk2_gen'])])
     return arap_path
 
+def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, rgb_root, msk_root, wco_root, wmk_root):
+    '''
+        objs:   list of DAVIS sequences, within each sequence must be the images
+        root:   path to where all the sequences are
+    '''
+
+    num = 5
+    root = 'data/DAVIS/orgRGB'
+    objs = os.listdir(root)
+
+    # TODO have the file pattern input from argument
+    reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
+
+    tmp_paths = []
+    bg_paths = []
+    print "Scanning background directory... ",
+    begin = time.time()
+    for bgroot, _, files in os.walk(bg_dir):
+        for f in files:
+            if '.PNG' not in f.upper() and \
+                '.JPG' not in f.upper() and  '.JPEG' not in f.upper():
+                continue
+            bg_paths.append(osp.join(bgroot, f))
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+
+    # for each image in the whole dataset
+    for iframe in range(num):
+        nobjs = 3 # np.randint(6, 10)
+        pickeds = []
+
+
+        # load background
+        while True:
+            if len(tmp_paths) == 0:
+                tmp_paths = sorted(bg_paths[:]) # copy
+            bgpath = rn.choice(tmp_paths)
+            tmp_paths.remove(bgpath)
+            try:
+                bgim = np.array(Image.open(bgpath))
+                if bgim.shape[2] == 3:
+                    break
+            except:
+                pass
+            # if something wrong happens
+            bg_paths.remove(bgpath)
+
+        # fit background to the image size
+        bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1])
+
+
+        lmdb_paths = []
+        arap_paths = []
+        arap_seg_paths = []
+
+        ngpus = len(flags.gpu)
+        gpu_queue = Queue(ngpus)
+        for g in flags.gpu:
+            gpu_queue.put(g)
+        procs = {}
+        path_segments = [] # keeping track of path set for each object for bg pasting
+        # for each object in n objects to be put in this image
+        for iobj in range(nobjs):
+
+            # sampling an object without replacement
+            while True:
+                seq = rn.choice(objs)
+                if seq not in pickeds:
+                    pickeds.append(seq)
+                    break
+
+            # sampling a frame distance
+            fd = rn.randint(1, 5) # TODO: incorporate into output_root
+
+            # randomly pick a file
+            files = sorted([f for f in os.listdir(osp.join(root, seq))
+                        if reg.search(f) is not None])
+
+            while True:
+                f1 = rn.choice(files[:-fd-1])
+                f, ext = osp.splitext(f1) # strip extension path
+                # getting frame number
+                num = reg.search(f1)
+                if num is None:
+                    continue
+                n = '{:0'+str(len(num.group(1)))+'d}'
+                # getting next frame according to frame distance fd
+                n = n.format(int(num.group(1))+fd)
+                f2 = f.replace(num.group(1), n)
+
+                if f2+ext in files:
+                    break
+
+                ## TODO sanity check if all required files exist for the pair of chosen frames
+                #if not osp.exists(osp.join(msk_org, seq, f +'.png')):
+                #    continue
+
+            ## skipping if out of second frame
+            #if not osp.exists(osp.join(rgb_org, seq, f2+ext)) or \
+            #    not osp.exists(osp.join(msk_org, seq, f2+'.png')):
+            #    continue
+
+
+            fdn = 'fd{:d}'.format(fd)
+            rgb_org = osp.join(input_root, orgcolor)
+            msk_org = osp.join(input_root, orgmask)
+            cst_root = osp.join(output_root, fdn, constraints_dir)
+            flo_root = osp.join(output_root, fdn, flow_dir)
+
+            rgb_root = osp.join(output_root, fdn, color_dir)
+            msk_root = osp.join(output_root, fdn, mask_dir)
+            wco_root = osp.join(output_root, fdn, wrgb_dir)
+            wmk_root = osp.join(output_root, fdn, wMask_dir)
+
+
+
+            # generating arap path set
+            entry = {}
+            entry['rgb1_gen'] = osp.abspath(osp.join(rgb_root, seq, f+'.png'))
+            entry['msk1_gen'] = osp.abspath(osp.join(msk_root, seq, f+'.png'))
+            entry['rgb2_gen'] = osp.abspath(osp.join(wco_root, seq, f+'.png'))
+            entry['msk2_gen'] = osp.abspath(osp.join(wmk_root, seq, f+'.png'))
+
+            entry['cstr_tmp'] = osp.abspath(osp.join(cst_root, seq, f+'.txt'))
+            entry['flow_gen'] = osp.abspath(osp.join(flo_root, seq, f+'.flo'))
+
+            entry['rgb1_org'] = osp.abspath(osp.join(rgb_org, seq, f1))
+            entry['msk1_org'] = osp.abspath(osp.join(msk_org, seq, f+'.png'))
+            entry['rgb2_org'] = osp.abspath(osp.join(rgb_org, seq, f2+ext))
+            entry['msk2_org'] = osp.abspath(osp.join(msk_org, seq, f2+'.png'))
+
+            for k in entry:
+                if not osp.exists(entry[k]):
+                    break
+            else:
+                # loading data from entry
+                # pasting onto to the background # TODO
+                # saving to file
+                continue
+
+            # if not exists
+            im1, mk1 = run_1image(entry, lmdb_paths, arap_paths, arap_seg_paths)
+
+            # we dont need this: we dont paste segments onto background in this stage
+            #bgim = add_bg(im1, mk1, bgim) # TODO paste at random position
+            path_segments.append((im1, mk1, entry))
+            # output to file
+            #bgs.append((bgim2, bgflo, mk1))
+            #Image.fromarray(out1).save(p['rgb1_gen'])
+
+
+            #do_arap(arap_paths, 0, arap_seg_paths, [])
+            #arap_paths = []
+            #arap_seg_paths = []
+
+            if not gpu_queue.empty():
+                gpu = gpu_queue.get()
+                proc = Process(target=do_arap,
+                            args=(arap_paths, gpu, gpu_queue, arap_seg_paths, []))
+                proc.start()
+                procs[gpu] = proc
+                arap_paths = []
+                arap_seg_paths = []
+
+        # wait for all the threads to finish
+        if len(procs) > 0:
+            for k in procs:
+                procs[k].join()
+
+        for ps in path_segments:
+            bgim, bgim2, bgflo = add_bg2(ps, bgim, bgim2, bgflo)
+
+        outpath = osp.join(output_root, 'data')
+        if not osp.isdir(outpath):
+            os.makedirs(outpath)
+        Image.fromarray(bgim).save(osp.join(outpath, '{:05d}_1.png'.format(iframe)))
+        Image.fromarray(bgim2).save(osp.join(outpath, '{:05d}_2.png'.format(iframe)))
+        sintel_io.flow_write(osp.join(outpath, '{:05d}_f.flo'.format(iframe)),bgflo)
+
 def main():
 
     rgb_org = osp.join(input_root, orgcolor)
@@ -591,7 +769,68 @@ def main():
         gpu_queue.put(g)
     for i, p in enumerate(all_paths):
         print '{:.3f}%'.format(float(i) * 100 / len(all_paths))
-        run_1image(p, lmdb_paths, procs, gpu_queue, bgs, arap_paths, arap_seg_paths, tmp_paths, bg_paths)
+
+        # load background
+        while True:
+            if len(tmp_paths) == 0:
+                tmp_paths = sorted(bg_paths[:]) # copy
+            bgpath = rn.choice(tmp_paths)
+            tmp_paths.remove(bgpath)
+            try:
+                bgim = np.array(Image.open(bgpath))
+                if bgim.shape[2] == 3:
+                    break
+            except:
+                pass
+            # if something wrong happens
+            bg_paths.remove(bgpath)
+
+        # fit background to the image size
+        bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1])
+
+        im1, mk1 = run_1image(p, lmdb_paths, arap_paths, arap_seg_paths)
+
+        out1 = add_bg(im1, mk1, bgim)
+        # output to file
+        bgs.append((bgim2, bgflo, mk1))
+        Image.fromarray(out1).save(p['rgb1_gen'])
+
+
+        #do_arap(arap_paths, 0, arap_seg_paths, bgs)
+        #arap_paths = []
+        #arap_seg_paths = []
+        #bgs = []
+
+        if not gpu_queue.empty():
+            gpu = gpu_queue.get()
+            proc = Process(target=do_arap,
+                        args=(arap_paths, gpu, gpu_queue, arap_seg_paths, bgs))
+            proc.start()
+            procs[gpu] = proc
+            arap_paths = []
+            arap_seg_paths = []
+            bgs = []
+
+    #if len(arap_paths) > flags.narap:
+    #    if procs is not None:
+    #        for proc in procs:
+    #            proc.join()
+    #    npaths = len(arap_paths)
+    #    ngpus = len(flags.gpu)
+    #    d = npaths // ngpus
+    #    if npaths % ngpus > 0:
+    #        d += 1
+    #    for i, gpu in enumerate(flags.gpu):
+    #        paths = arap_paths[(i*d):min((i+1)*d, npaths)]
+    #        proc = Process(target=do_arap, args=(paths, bgs, gpu))
+    #        proc.start()
+    #        procs.append(proc)
+    #    arap_paths = []
+    #    bgs = []
+
+
+
+        # add background
 
     # wait for all the threads to finish
     if len(procs) > 0:
@@ -613,144 +852,91 @@ def main():
     shutil.rmtree('tmp')
 
 
+def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
 
-def run_1image(p, lmdb_paths, procs, gpu_queue, bgs, arap_paths, arap_seg_paths, tmp_paths, bg_paths):
-        arap_path = make_arap_path(p)
-        lmdb_paths.append(' '.join([arap_path.split(' ')[l] for l in [0, 4, 3]]))
+    arap_path = make_arap_path(p)
+    lmdb_paths.append(' '.join([arap_path.split(' ')[l] for l in [0, 4, 3]]))
 
-        # preparing for output
-        for k in p:
-            if not osp.isdir(osp.dirname(p[k])):
-                os.makedirs(osp.dirname(p[k]))
+    # preparing for output
+    for k in p:
+        if not osp.isdir(osp.dirname(p[k])):
+            os.makedirs(osp.dirname(p[k]))
 
-        im1, mk1, im2, mk2 = preprocess(p)
+    im1, mk1, im2, mk2 = preprocess(p)
 
-        if not has_mask(p['msk1_org'], p['msk2_org']):
-            cleanup(p)
-            return
+    if not has_mask(p['msk1_org'], p['msk2_org']):
+        cleanup(p)
+        return
 
-        run_matching(p['rgb1_org'], p['rgb2_org'],
-                    p['msk1_org'], p['msk2_org'], p['cstr_tmp'])
+    run_matching(p['rgb1_org'], p['rgb2_org'],
+                p['msk1_org'], p['msk2_org'], p['cstr_tmp'])
 
-        # Filter constraints to  belong in the same segment type and within radius 60px
-        # Load mask1 and mask2 images
-        cstr_lines = open(p['cstr_tmp']).read().splitlines()
-        cstrs = []
-        valids = [] # valid segment number in case of multiple segment
-        # check the constraints
-        for line in cstr_lines:
-            x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
+    # Filter constraints to  belong in the same segment type and within radius 60px
+    # Load mask1 and mask2 images
+    cstr_lines = open(p['cstr_tmp']).read().splitlines()
+    cstrs = []
+    valids = [] # valid segment number in case of multiple segment
+    # check the constraints
+    for line in cstr_lines:
+        x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
 
-            if valid_cnstr(x1, y1, x2, y2, mk1, mk2):
-                cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
-                valids.append(mk1[y1, x1])
-        # write back to file
-        open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
-        if len(cstrs) == 0:
-            cleanup(p)
-            return
+        if valid_cnstr(x1, y1, x2, y2, mk1, mk2):
+            cstrs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
+            valids.append(mk1[y1, x1])
+    # write back to file
+    open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
+    if len(cstrs) == 0:
+        cleanup(p)
+        return
 
-        # load background
-        while True:
-            if len(tmp_paths) == 0:
-                tmp_paths = sorted(bg_paths[:]) # copy
-            bgpath = rn.choice(tmp_paths)
-            tmp_paths.remove(bgpath)
-            try:
-                bgim = np.array(Image.open(bgpath))
-                if bgim.shape[2] == 3:
-                    break
-            except:
-                pass
-            # if something wrong happens
-            bg_paths.remove(bgpath)
+    # Convert mask
+    if not osp.isdir(osp.dirname(p['msk1_gen'])):
+        os.makedirs(osp.dirname(p['msk1_gen']))
 
-        # fit background to the image size
-        bgim, bgim2, bgflo = fit_bg(bgim, im1)
-        out1 = add_bg(im1, mk1, bgim)
+    seg_paths = None
+    if not flags.multseg:
+        mask = np.zeros_like(mk1, dtype=np.uint8)
+        mask[mk1==0] = ARAP_BG
+        Image.fromarray(mask).save(p['msk1_gen'])
+    else:
+        seg_paths = []
+        for s in np.unique(valids): # only check the valid segment (segment with at least 1 constraint)
+            if s == 0:
+                continue
+            p_ = replace_ext(p, s, keep_orgs=['rgb1_gen', 'cstr_tmp'])
 
-        # output to file
-        bgs.append((bgim2, bgflo))
-        if not osp.isdir(osp.dirname(p['rgb1_gen'])):
-            os.makedirs(osp.dirname(p['rgb1_gen']))
-        Image.fromarray(out1).save(p['rgb1_gen'])
+            # output mask per segment
+            mask = np.zeros_like(mk1, dtype=np.uint8) + ARAP_BG
+            mask[mk1 == s] = 0
+            Image.fromarray(mask).save(p_['msk1_gen'])
 
-        # Convert mask
-        if not osp.isdir(osp.dirname(p['msk1_gen'])):
-            os.makedirs(osp.dirname(p['msk1_gen']))
+            # output constraints per segment
+            cstr_segs = []
+            for line in cstr_lines:
+                x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
+                if mk1[y1, x1] == s:
+                    cstr_segs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
+            assert len(cstr_segs) > 0, 'Segment {:s} has no constraint'.format(s)
 
-        seg_paths = None
-        if not flags.multseg:
-            mask = np.zeros_like(mk1, dtype=np.uint8)
-            mask[mk1==0] = ARAP_BG # TODO mask with each object segment separately
-            Image.fromarray(mask).save(p['msk1_gen'])
-        else:
-            seg_paths = []
-            for s in np.unique(valids): # only check the valid segment (segment with at least 1 constraint)
-                if s == 0:
-                    continue
-                p_ = replace_ext(p, s, keep_orgs=['rgb1_gen', 'cstr_tmp'])
-
-                # output mask per segment
-                mask = np.zeros_like(mk1, dtype=np.uint8) + ARAP_BG
-                mask[mk1 == s] = 0
-                Image.fromarray(mask).save(p_['msk1_gen'])
-
-                # output constraints per segment
-                cstr_segs = []
-                for line in cstr_lines:
-                    x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
-                    if mk1[y1, x1] == s:
-                        cstr_segs.append('\t'.join(['{:d}']*4).format(x1, y1, x2, y2))
-                assert len(cstr_segs) > 0, 'Segment {:s} has no constraint'.format(s)
-
-                # output constraints per segment
-                seg_paths.append(make_arap_path(p_))
-            arap_seg_paths.append((arap_path, seg_paths))
+            # output constraints per segment
+            seg_paths.append(make_arap_path(p_))
+        arap_seg_paths.append((arap_path, seg_paths))
 
 
-        for sp in arap_path.split(' ')[:2]:
-            assert osp.exists(sp), 'File not found:\n{}'.format(sp)
-        for sp in arap_path.split(' ')[3:]:
-            if not osp.isdir(osp.dirname(sp)):
-                os.makedirs(osp.dirname(sp))
+    for sp in arap_path.split(' ')[:2]:
+        assert osp.exists(sp), 'File not found:\n{}'.format(sp)
+    for sp in arap_path.split(' ')[3:]:
+        if not osp.isdir(osp.dirname(sp)):
+            os.makedirs(osp.dirname(sp))
 
-        if seg_paths is None:
-            arap_paths.append(arap_path)
-        else:
-            arap_paths += seg_paths
+    if seg_paths is None:
+        arap_paths.append(arap_path)
+    else:
+        arap_paths += seg_paths
+
+    return im1, mk1
 
 
-        #do_arap(arap_paths, bgs, 0, arap_seg_paths)
-        #arap_paths = []
-        #arap_seg_paths = []
-        #bgs = []
-
-        if not gpu_queue.empty():
-            gpu = gpu_queue.get()
-            proc = Process(target=do_arap, args=(arap_paths, bgs, gpu, gpu_queue, arap_seg_paths))
-            proc.start()
-            procs[gpu] = proc
-            arap_paths[:] = []
-            arap_seg_paths[:] = []
-            bgs[:] = []
-
-        #if len(arap_paths) > flags.narap:
-        #    if procs is not None:
-        #        for proc in procs:
-        #            proc.join()
-        #    npaths = len(arap_paths)
-        #    ngpus = len(flags.gpu)
-        #    d = npaths // ngpus
-        #    if npaths % ngpus > 0:
-        #        d += 1
-        #    for i, gpu in enumerate(flags.gpu):
-        #        paths = arap_paths[(i*d):min((i+1)*d, npaths)]
-        #        proc = Process(target=do_arap, args=(paths, bgs, gpu))
-        #        proc.start()
-        #        procs.append(proc)
-        #    arap_paths = []
-        #    bgs = []
 
 
 if __name__ == "__main__":
@@ -798,4 +984,5 @@ if __name__ == "__main__":
     output_root = flags.output.rstrip(osp.sep)
 
     logging.basicConfig(filename='example.log',level=logging.DEBUG)
-    main()
+    #main()
+    generic_pipeline()

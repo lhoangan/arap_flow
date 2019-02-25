@@ -483,13 +483,12 @@ def make_arap_path(p):
                         osp.abspath(p['msk2_gen'])])
     return arap_path
 
-def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, rgb_root, msk_root, wco_root, wmk_root):
+def generic_pipeline(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root, flo_root, rgb_root, msk_root, wco_root, wmk_root):
     '''
         objs:   list of DAVIS sequences, within each sequence must be the images
         root:   path to where all the sequences are
     '''
 
-    num = 5
     root = 'data/DAVIS/orgRGB'
     objs = os.listdir(root)
 
@@ -509,8 +508,14 @@ def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, r
     print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
 
     # for each image in the whole dataset
-    for iframe in range(num):
-        nobjs = 3 # np.randint(6, 10)
+    iframe = frnum
+    while True:
+        begin = time.time()
+        if iframe == tonum:
+            break
+        print 'Processing file number: ',iframe
+
+        nobjs = rn.randint(8, 12)
         pickeds = []
 
 
@@ -680,6 +685,9 @@ def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, r
         Image.fromarray(bgim).save(osp.join(outpath, '{:05d}_1.png'.format(iframe)))
         Image.fromarray(bgim2).save(osp.join(outpath, '{:05d}_2.png'.format(iframe)))
         sintel_io.flow_write(osp.join(outpath, '{:05d}_f.flo'.format(iframe)),bgflo)
+
+        iframe += 1
+        print 'Finish 1 file in: ', time.time() - begin, ' s'
 
 def main():
 
@@ -985,6 +993,9 @@ if __name__ == "__main__":
             help='2-tuple of [width] [space] [height] (in this order) '
             'to which all images are resized. '
             'Omit to keep original dimensions of images.')
+    parser.add_argument('--range', nargs=2, required=True,
+            help='2-tuple of [width] [space] [height] (in this order) '
+            'to which all images are resized. ')
     parser.add_argument('--fd', type=int, default=1,
             help='Positive integer indicating the distance between 2 frames to '
             'generate optical flow; should not be larger than 10 for better '
@@ -1007,4 +1018,4 @@ if __name__ == "__main__":
 
     logging.basicConfig(filename='example.log',level=logging.DEBUG)
     #main()
-    generic_pipeline()
+    generic_pipeline(int(flags.range[0]), int(flags.range[1]))

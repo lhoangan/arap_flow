@@ -627,7 +627,11 @@ def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, r
                 continue
 
             # if not exists
-            im1, mk1 = run_1image(entry, lmdb_paths, arap_paths, arap_seg_paths)
+            result = run_1image(entry, lmdb_paths, arap_paths, arap_seg_paths)
+            if result is None:
+                continue
+            else:
+                im1, mk1  = result
 
             # we dont need this: we dont paste segments onto background in this stage
             #bgim = add_bg(im1, mk1, bgim) # TODO paste at random position
@@ -660,9 +664,12 @@ def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, r
             arap_seg_paths = []
 
         # wait for all the threads to finish
-        if len(procs) > 0:
-            for k in procs:
-                procs[k].join()
+        for k in procs:
+            print 'Waiting for threads ',k,' to finish'
+            procs[k].join()
+
+        if len(path_segments) == 0:
+            continue
 
         for ps in path_segments:
             bgim, bgim2, bgflo = add_bg2(ps, bgim, bgim2, bgflo)
@@ -875,7 +882,8 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
 
     if not has_mask(p['msk1_org'], p['msk2_org']):
         cleanup(p)
-        return
+        print 'File FAILED!'
+        return None
 
     run_matching(p['rgb1_org'], p['rgb2_org'],
                 p['msk1_org'], p['msk2_org'], p['cstr_tmp'])
@@ -896,7 +904,8 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
     open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
     if len(cstrs) == 0:
         cleanup(p)
-        return
+        print 'File FAILED!'
+        return None
 
     # Convert mask
     if not osp.isdir(osp.dirname(p['msk1_gen'])):

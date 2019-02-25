@@ -650,6 +650,15 @@ def generic_pipeline():#num, objs, root, rgb_org, msk_org, cst_root, flo_root, r
                 arap_paths = []
                 arap_seg_paths = []
 
+        while len(arap_paths) > 0:
+            gpu = gpu_queue.get()
+            proc = Process(target=do_arap,
+                        args=(arap_paths, gpu, gpu_queue, arap_seg_paths, []))
+            proc.start()
+            procs[gpu] = proc
+            arap_paths = []
+            arap_seg_paths = []
+
         # wait for all the threads to finish
         if len(procs) > 0:
             for k in procs:

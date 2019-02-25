@@ -235,7 +235,7 @@ def bg_gen(bg_dir, im1paths, im2paths, flow_root):
 def flatten(arap_seg_paths):
     for arap_path, seg_paths in arap_seg_paths:
         assert len(seg_paths) > 0, 'Something wrong with seg_paths'
-        flow_path, rgb2_path, msk2_path = seg_paths[0].split(' ')[-3:]
+        _, msk1_path, _, flow_path, rgb2_path, msk2_path = seg_paths[0].split(' ')
         flow_im = np.dstack(sintel_io.flow_read(flow_path))
         rgb2_im = np.array(Image.open(rgb2_path))
         msk2_im = np.array(Image.open(msk2_path))
@@ -248,19 +248,20 @@ def flatten(arap_seg_paths):
         os.remove(msk2_path)
 
         for i in range(1, len(seg_paths)):
-            flow_path, rgb2_path, msk2_path = seg_paths[i].split(' ')[-3:]
+            _, msk1_path, _, flow_path, rgb2_path, msk2_path = seg_paths[i].split(' ')
+            #flow_path, rgb2_path, msk2_path = seg_paths[i].split(' ')[-3:]
+            msk1_ob = np.array(Image.open(msk1_path)) == 0
             flow_ = np.dstack(sintel_io.flow_read(flow_path))
             rgb2_ = np.array(Image.open(rgb2_path))
             msk2_ = np.array(Image.open(msk2_path))
-            msk_ob = msk2_ != 0
-            msk_bg = msk2_ == 0
+            msk2_ob = msk2_ != 0
 
             if len(rgb2_.shape) == 2:
                 rgb2_ = rgb2_[..., None]
 
-            flow_im = flow_im*msk_bg[..., None] + flow_ * msk_ob[..., None]
-            rgb2_im = rgb2_im*msk_bg[..., None] + rgb2_ * msk_ob[..., None]
-            msk2_im = msk2_im*msk_bg + msk2_ * msk_ob
+            flow_im[msk1_ob] = flow_[msk1_ob]
+            rgb2_im[msk2_ob] = rgb2_[msk2_ob]
+            msk2_im[msk2_ob] = msk2_ob[msk2_ob]
 
             os.remove(flow_path)
             os.remove(rgb2_path)

@@ -318,6 +318,45 @@ def do_arap(paths, gpu, gpu_queue, arap_seg_paths=[], bgs=[]):
     # free the gpu
     gpu_queue.put(gpu)
 
+def add_bg2(ps, bgim1, bgim2, bgflo, bgval=0):
+
+    rgb1 = ps[0]
+    msk1 = ps[1]
+    flow = np.dstack(sintel_io.flow_read(ps[2]['flow_gen']))
+    rgb2 = np.array(Image.open(ps[2]['rgb2_gen']))
+    msk2 = np.array(Image.open(ps[2]['msk2_gen']))
+
+    # calculating random displacement to shift the object
+    idx = msk1 != bgval
+    rows = np.any(idx, axis=1)
+    cols = np.any(idx, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+
+    ravg = (rmax + rmin) / 2
+    cavg = (cmax + cmin) / 2
+
+    rdisp = rn.randint(0, msk1.shape[0]) - ravg
+    cdisp = rn.randint(0, msk1.shape[1]) - cavg
+
+    # by padding the mask with background value, we shift the object
+    pad = [ [(rdisp>0)*abs(rdisp),(rdisp<0)*abs(rdisp)],
+            [(cdisp>0)*abs(cdisp),(cdisp<0)*abs(cdisp)]]
+
+    h, w = msk1.shape
+    r, c = (rdisp<0)*abs(rdisp), (cdisp<0)*abs(cdisp)
+    msk1 = np.pad(msk1, pad, mode='constant', constant_values=bgval)[r:r+h,c:c+w]
+    msk2 = np.pad(msk2, pad, mode='constant', constant_values=bgval)[r:r+h,c:c+w]
+    rgb1 = np.pad(rgb1, pad+[(0,0)], mode='constant', constant_values=bgval)[r:r+h,c:c+w,:]
+    flow = np.pad(flow, pad+[(0,0)], mode='constant', constant_values=bgval)[r:r+h,c:c+w,:]
+    rgb2 = np.pad(rgb2, pad+[(0,0)], mode='constant', constant_values=bgval)[r:r+h,c:c+w,:]
+
+    rgb1 = add_bg(rgb1, msk1, bgim1)
+    flow = add_bg(flow, msk1, bgflo)
+    rgb2 = add_bg(rgb2, msk2, bgim2)
+
+    return rgb1, rgb2, flow
+
 def valid_cnstr(x1, y1, x2, y2, msk1, msk2):
 
     if x1 >= msk1.shape[1] or x2 >= msk2.shape[1] or \

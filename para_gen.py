@@ -42,6 +42,16 @@ def param_gen(k, mu, sigma, a, b, p):
     return beta * max(min(np.sign(gamma) * abs(gamma)**k, b), a) + (1-beta)*mu
 
 
+def make_tf(w, h, tx, ty, an, sx, sy):
+    shift_y, shift_x = rn.randint(0, h), rn.randint(0, w)
+    tf_shift = SimilarityTransform(translation=[-shift_x, -shift_y])
+    tf_shift_inv = SimilarityTransform(translation=[shift_x, shift_y])
+    tf_rotate = tf_shift + (SimilarityTransform(rotation=np.deg2rad(an)) + tf_shift_inv)
+    tf_trans  = SimilarityTransform(translation=[tx, ty])
+    tf_scale  = AffineTransform(scale=(sx,sy))
+
+    return tf_trans + tf_rotate + tf_scale
+
 def warp_bg(bg, w, h):
 
     X, Y = np.meshgrid(np.arange(0, bg.shape[1]), np.arange(0, bg.shape[0]))
@@ -57,20 +67,11 @@ def warp_bg(bg, w, h):
         sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
         sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
 
-        shift_y, shift_x = rn.randint(0, h), rn.randint(0, w)
-        tf_shift = SimilarityTransform(translation=[-shift_x, -shift_y])
-        tf_shift_inv = SimilarityTransform(translation=[shift_x, shift_y])
-        tf_rotate = tf_shift + (SimilarityTransform(rotation=np.deg2rad(an)) + tf_shift_inv)
-        tf_trans  = SimilarityTransform(translation=[tx, ty])
-        tf_scale  = AffineTransform(scale=(sx,sy))
+        tform = make_tf(w, h, tx, ty, an, sx, sy)
         #form = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
-        grid_ = warp(grid.astype(np.float32), (tf_trans + tf_rotate + tf_scale).inverse,
-            order=1, mode='constant', cval=-WARP_CONST)
-
-        #tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
-        #grid_ = warp(grid.astype(np.float32), tform.inverse, order=1, mode='constant', cval=WARP_CONST)
-        bg2 = warp(bg.astype(np.float32), (tf_trans + tf_rotate + tf_scale).inverse,
-                order=1)
+        grid_ = warp(grid.astype(np.float32), tform.inverse, order=1,
+                mode='constant', cval=-WARP_CONST)
+        bg2 = warp(bg.astype(np.float32), tform.inverse, order=1)
         bgfl = grid_ - grid
 
         assert bgfl.shape[:-1] == bg2.shape[:-1], 'Warped BG and Flow has different size '\

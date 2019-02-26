@@ -1,6 +1,5 @@
 import re, os, sys, time, numpy as np, random as rn, os.path as osp
-from math import radians
-from skimage.transform import warp, AffineTransform
+from skimage.transform import warp, AffineTransform, SimilarityTransform
 import argparse, shutil, logging
 from math import sqrt
 from PIL import Image
@@ -46,8 +45,8 @@ def param_gen(k, mu, sigma, a, b, p):
 def warp_bg(bg, w, h):
 
     X, Y = np.meshgrid(np.arange(0, bg.shape[1]), np.arange(0, bg.shape[0]))
-    X -= int(bg.shape[1] / 2)
-    Y -= int(bg.shape[0] / 2)
+    X = int(bg.shape[1] / 2)
+    Y = int(bg.shape[0] / 2)
     grid = np.dstack((X, Y))
 
     while True:
@@ -58,9 +57,20 @@ def warp_bg(bg, w, h):
         sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
         sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
 
-        tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
-        grid_ = warp(grid.astype(np.float32), tform.inverse, order=1, mode='constant', cval=WARP_CONST)
-        bg2 = warp(bg.astype(np.float32), tform.inverse, order=1)
+        shift_y, shift_x = rn.randint(0, h), rn.randint(0, w)
+        tf_shift = SimilarityTransform(translation=[-shift_x, -shift_y])
+        tf_shift_inv = SimilarityTransform(translation=[shift_x, shift_y])
+        tf_rotate = tf_shift + (SimilarityTransform(rotation=np.deg2rad(an)) + tf_shift_inv)
+        tf_trans  = SimilarityTransform(translation=[tx, ty])
+        tf_scale  = AffineTransform(scale=(sx,sy))
+        #form = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
+        grid_ = warp(grid.astype(np.float32), (tf_trans + tf_rotate + tf_scale).inverse,
+            order=1, mode='constant', cval=-WARP_CONST)
+
+        #tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
+        #grid_ = warp(grid.astype(np.float32), tform.inverse, order=1, mode='constant', cval=WARP_CONST)
+        bg2 = warp(bg.astype(np.float32), (tf_trans + tf_rotate + tf_scale).inverse,
+                order=1)
         bgfl = grid_ - grid
 
         assert bgfl.shape[:-1] == bg2.shape[:-1], 'Warped BG and Flow has different size '\
@@ -241,7 +251,7 @@ def flatten(arap_seg_paths):
         msk2_im = np.array(Image.open(msk2_path))
 
         if len(rgb2_im.shape) == 2:
-            rgb2_im = rgb2_im[..., None]
+            rgb2_im = np.dstack((rgb2_im, rgb2_im, rgb2_im))
 
         os.remove(flow_path)
         os.remove(rgb2_path)

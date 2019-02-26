@@ -1,6 +1,7 @@
+import sys
 from math import pi, radians
 import numpy as np, random as rn
-from skimage.transform import warp, AffineTransform
+from skimage.transform import warp, AffineTransform, SimilarityTransform
 import matplotlib.pyplot as plt
 from PIL import Image
 import time
@@ -145,7 +146,69 @@ def param_gen(k, mu, sigma, a, b, p):
     beta = np.random.binomial(1, p)
     return beta * max(min(np.sign(gamma) * abs(gamma)**k, b), a) + (1-beta)*mu
 
-def warp_bg(w, h):
+def warp_bg(j, w, h):
+
+    r = rn.uniform(2, 3)
+    bgw = int(w*r)
+    bgh = int(h*r)
+
+    X, Y = np.meshgrid(np.arange(0, bgw), np.arange(0, bgh))
+    gr = np.dstack((X, Y))
+
+    while True:
+
+        tx = param_gen(4, 0, 1.3, -40, 40, 1)
+        ty = param_gen(4, 0, 1.3, -40, 40, 1)
+        an = param_gen(2, 0, 1.3, -10, 10, 0.3) # in degree
+        sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+        sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
+
+        shift_y, shift_x = rn.randint(0, h), rn.randint(0, w)
+        tf_shift = SimilarityTransform(translation=[-shift_x, -shift_y])
+        tf_shift_inv = SimilarityTransform(translation=[shift_x, shift_y])
+        tf_rotate = tf_shift + (SimilarityTransform(rotation=np.deg2rad(an)) + tf_shift_inv)
+        tf_trans  = SimilarityTransform(translation=[tx, ty])
+        tf_scale  = AffineTransform(scale=(sx,sy))
+        #form = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
+        gr_ = warp(gr.astype(np.float32), (tf_trans + tf_rotate + tf_scale).inverse,
+            order=1, mode='constant', cval=-12345)
+
+        fl = gr_ - gr
+
+        # cropping from invalid regions
+        # getting the available regions
+        mask = np.logical_and(  gr_[...,0] > -12345/10,
+                                gr_[...,1] > -12345/10,
+                                np.logical_or(  gr_[...,0] != 0,
+                                                gr_[...,0] != 0))
+        csy = np.cumsum(mask, axis=0)
+        csx = np.cumsum(mask, axis=1)
+        idx = np.logical_and(csy > h+5, csx > w+5,
+                             np.cumsum(csx, axis=0) > ((h+5)*(w+5)))
+        ys, xs = np.where(idx==True)
+
+        # get the pair of x, y that gives no contamination from warping
+        for i in range(len(ys)):
+            y, x = ys[i], xs[i]
+            tmp = gr_[y-h:y,x-w:x,:]
+            if (tmp < -12345/10).sum() == 0 and \
+                np.all(tmp==(0.,0.),axis=2).sum() == 0:
+                sy = y-h
+                sx = x-w
+                fl = fl[y-h:y,x-w:x,:]
+                break
+
+        if fl.min() > -100 and fl.max() < 100:
+            break
+
+    print j,
+    sys.stdout.flush()
+    Image.fromarray(convert(fl)).save('/hddstore/hale/bg/{:03d}.png'.format(j))
+
+    return 1
+
+
+def warp_bg1(w, h):
     # assuming that bg is landscape and already fit to image
 
     # scale the image to 2xlargest translation, then crop it back after warping
@@ -165,11 +228,17 @@ def warp_bg(w, h):
     sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
     sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
 
-    tform = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
-    gr_ = warp(gr.astype(np.float32), tform.inverse, order=3, mode='constant', cval=-12345)
+    shift_y, shift_x = rn.randint(0, h), rn.randint(0, w)
+    tf_shift = SimilarityTransform(translation=[-shift_x, -shift_y])
+    tf_shift_inv = SimilarityTransform(translation=[shift_x, shift_y])
+    tf_rotate = tf_shift + (SimilarityTransform(rotation=np.deg2rad(an)) + tf_shift_inv)
+    tf_trans  = SimilarityTransform(translation=[tx, ty])
+    tf_scale  = AffineTransform(scale=(sx,sy))
+    #form = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
+    gr_ = warp(gr.astype(np.float32), (tf_trans + tf_rotate + tf_scale).inverse,
+            order=3, mode='constant', cval=-12345)
     #bg_ = warp(bg.astype(np.float32), tform.inverse, order=3)[h/2:h/2+h, w/2:w/2+w,:]
     fl = (gr_ - gr)
-
 
     mask = np.logical_and(gr_[...,0] > -1234, gr_[...,1] > -1234)
     #maskc =  mask.sum(axis=0) >= h # showing which column can accommodate h
@@ -225,11 +294,11 @@ counter = 0
 begin = time.time()
 for i in range(999999999):
     if i % 100 == 0:
-        print 'Status: i = {:d} | Counter = {:d} | Time per image = {:f}s'.format(i, counter, (time.time()-begin)/100)
+        print '\nStatus: i = {:d} | Counter = {:d} | Time per image = {:f}s'.format(i, counter, (time.time()-begin)/100)
         begin = time.time()
     w = rn.randint(800, 1500)
     h = rn.randint(500, w-100)
-    counter += warp_bg(w, h)#1200, 800)
+    counter += warp_bg(i, w, h)#1200, 800)
 
 
 #plt.imshow(bg), plt.figure(), plt.imshow(convert(fl)), plt.figure(), plt.imshow(bg_), plt.show()

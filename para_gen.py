@@ -1174,8 +1174,6 @@ def one_for_all(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root, flo_
         root:   path to where all the sequences are
     '''
 
-    myrn = rn.Random()
-    myrn.seed(1000)
 
     root = 'data/DAVIS/orgRGB'
     objs = os.listdir(root)
@@ -1244,11 +1242,11 @@ def one_for_all(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root, flo_
             files = sorted([f for f in os.listdir(osp.join(root, seq))
                         if reg.search(f) is not None])
 
-            print 'Sequence: ',seq
+            print 'Sequence: ',seq, ' ',
 
             # sampling a frame distance
             fd = myrn.randint(1, 5) # TODO: incorporate into output_root
-            print 'Frame distance: ',fd
+            print 'Frame distance: ',fd, '|',
 
             while True:
                 f1 = myrn.choice(files[:-fd-1])
@@ -1325,7 +1323,7 @@ def one_for_all(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root, flo_
             bgim2 = add_bg(im2, mk2, bgim2)
             bgflo = add_bg(flo, mk1, bgflo)
 
-        outpath = osp.join(output_root, 'test_all41')
+        outpath = osp.join(output_root, flags.outname)
         if not osp.isdir(outpath):
             os.makedirs(outpath)
         Image.fromarray(bgim).save(osp.join(outpath, '{:05d}_1.png'.format(iframe)))
@@ -1382,7 +1380,7 @@ def prepare_segment(im, mk, myrn, bgval=0, im2=None, mk2=None, flo=None):
     # pick a random size within the  given range using flownet's formula
     ts = max(50, min(640, myrn.gauss(200, 200))) # target size
     r  = float(ts) / max(sh, sw) # ratio
-    print 'Random size: ', ts, ' Ratio: ', r
+    print 'Size: ', ts, ' Ratio: ', r, '|',
 
     # resizing to new width and height
     nw, nh = int(sw*r), int(sh*r)
@@ -1442,18 +1440,17 @@ def run_1affine1(im, mk, x, y):
 
     h, w, _ = im.shape
 
-    up, lp = min(y, max(300, int(sh/2))), min(x, max(300,int(sw/2)))
-    dp, rp = min(h-y-sh, max(300, int(sh/2))), min(w-x-sw, max(300,int(sw/2)))
+    up, lp = max(300, int(sh/2)), max(300,int(sw/2))
+    dp, rp = max(300, int(sh/2)), max(300,int(sw/2))
     pad = [ [up, dp], [lp, rp]] # up, down, left, right pad
     im1 = np.pad(im1, pad+[[0, 0]], mode='constant', constant_values=0)
     mk1 = np.pad(mk1, pad, mode='constant', constant_values=0)
-    gr  = np.dstack(np.meshgrid(np.arange(0, im1.shape[1]), np.arange(0, im1.shape[0])))
-    gr[..., 0] -= up
-    gr[..., 1] -= lp
+    gr1 = np.pad(gr,  pad+[[0,0]], mode='reflect', reflect_type='odd')
+    #gr[..., 0] -= up
+    #gr[..., 1] -= lp
 
-
-    fsup, fslp = y-up, x-lp
-    fsdp, fsrp = h-(y+sh+dp), w-(x+sw+rp)
+    fsup, fslp = max(0, y-up), max(0, x-lp)
+    fsdp, fsrp = max(0, h-(y+sh+dp)), max(0, w-(x+sw+rp))
     fspad = [[fsup, fsdp],[fslp, fsrp]] # padded to full size of input image im
 
 
@@ -1470,6 +1467,11 @@ def run_1affine1(im, mk, x, y):
     #er1, ec1 = min(hh, sr1+h1
 
 
+    sr = abs(min(0, y-up))
+    sc = abs(min(0, x-lp))
+
+    rot_center_x = lp + sw/2
+    rot_center_y = up + sh/2
 
     for s in np.unique(mk1):
         if s == 0:
@@ -1481,15 +1483,15 @@ def run_1affine1(im, mk, x, y):
         sx = param_gen(2, 1, 0.18, 0.8, 1.2, 0.7)
         sy = param_gen(2, 1, 0.18, 0.8, 1.2, 0.7)
 
-        tform = make_tf(im1.shape[1], im1.shape[0], tx, ty, an, sx, sy)
+        tform = make_tf(im1.shape[1], im1.shape[0], tx, ty, an, sx, sy, rot_center_x, rot_center_y)
         im_ = warp(im1.astype(np.float32), tform.inverse, order=1)
         mk_ = warp(mk1.astype(np.float32), tform.inverse, order=0)
-        gr_ = warp(gr.astype(np.float32), tform.inverse, order=1)
-        fl_ = gr_ - gr
+        gr_ = warp(gr1.astype(np.float32), tform, order=1)
+        fl_ = gr_ - gr1
 
-        im_ = np.pad(im_, fspad+[[0, 0]], mode='constant')
-        mk_ = np.pad(mk_, fspad, mode='constant')
-        fl_ = np.pad(fl_, fspad+[[0,0]], mode='constant')
+        im_ = np.pad(im_, fspad+[[0, 0]], mode='constant')[sr:sr+h,sc:sc+w,:]
+        mk_ = np.pad(mk_, fspad, mode='constant')[sr:sr+h,sc:sc+w]
+        fl_ = np.pad(fl_, fspad+[[0,0]], mode='constant')[sr:sr+h,sc:sc+w,:]
 
         idx = mk_==s
         im2[idx] = im_[idx]
@@ -1538,6 +1540,8 @@ if __name__ == "__main__":
             help='Create random affine transformation for object segments')
     parser.add_argument('--all41', action='store_true', default=False,
             help='Create random affine transformation for object segments')
+    parser.add_argument('--outname', default=None, required=True,
+            help='Output directory')
     parser.add_argument('--single', action='store_true', default=False,
             help='Create random affine transformation for object segments')
     parser.add_argument('--orgmask', type=str, default='orgMasks', required=False,

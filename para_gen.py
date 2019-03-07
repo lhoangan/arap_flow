@@ -55,8 +55,6 @@ def make_tf(w, h, tx, ty, an, sx, sy):
 def warp_bg(bg, w, h):
 
     X, Y = np.meshgrid(np.arange(0, bg.shape[1]), np.arange(0, bg.shape[0]))
-    X = int(bg.shape[1] / 2)
-    Y = int(bg.shape[0] / 2)
     grid = np.dstack((X, Y))
 
     while True:
@@ -98,7 +96,6 @@ def warp_bg(bg, w, h):
                 sx = x-w
                 fl = bgfl[y-h:y,x-w:x,:]
                 break
-
         if fl.min() > -100 and fl.max() < 100:
             break
 
@@ -127,7 +124,7 @@ def prepare_bg(bg, target_size, static=True):
         sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
         # cropping
         bg = bg[sy:(sy+imh), sx:(sx+imw), :]
-        bg2 = bg
+        bg2 = bg.copy()
         bgfl = np.zeros((bg.shape[0], bg.shape[1], 2))
 
     return bg, bg2, bgfl
@@ -152,14 +149,14 @@ def fit_bg(bg, im, static=True):
         sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
         # cropping
         bg = bg[sy:(sy+imh), sx:(sx+imw), :]
-        bg2 = bg
+        bg2 = bg.copy()
         bgfl = np.zeros((bg.shape[0], bg.shape[1], 2))
 
     return bg, bg2, bgfl
 
 def add_bg(im, mk, bgim, bgval=0):
-    assert mk.shape == im.shape[:-1], 'Sizes mismatch mask and image '+\
-            str(mk.shape) + ' vs. ' + str(im.shape[:-1])
+    assert mk.shape == im.shape[:2], 'Sizes mismatch mask and image '+\
+            str(mk.shape) + ' vs. ' + str(im.shape[:2])
     assert bgim.shape == im.shape, 'Sizes mismatch background and image '+\
             str(bgim.shape) + ' vs. ' + str(im.shape)
     out = im.copy()
@@ -290,7 +287,7 @@ def do_arap(paths, gpu, gpu_queue, arap_seg_paths=[], bgs=[]):
     # create temporary list file to input to ARAP
     if not osp.isdir('tmp'):
         os.makedirs('tmp')
-    fn = 'gpu-{:d}_{}'.format(gpu, str(time.time()).replace('.', '_'))
+    fn = 'gpu-{:d}_{:d}_{}'.format(gpu, rn.randint(0,9999),str(time.time()).replace('.', '_'))
     print 'GPU ' , gpu , ' ' , len(paths) , ' files'
     try:
         open('tmp/{}.txt'.format(fn), 'w').write('\n'.join(paths))
@@ -328,6 +325,7 @@ def do_arap(paths, gpu, gpu_queue, arap_seg_paths=[], bgs=[]):
     # free the gpu
     gpu_queue.put(gpu)
 
+
 def add_bg2(ps, bgim1, bgim2, bgflo, bgval=0):
 
     rgb1 = ps[0]
@@ -338,10 +336,8 @@ def add_bg2(ps, bgim1, bgim2, bgflo, bgval=0):
 
     # calculating random displacement to shift the object
     idx = msk1 != bgval
-    rows = np.any(idx, axis=1)
-    cols = np.any(idx, axis=0)
-    rmin, rmax = np.where(rows)[0][[0, -1]]
-    cmin, cmax = np.where(cols)[0][[0, -1]]
+    rmin, rmax = np.where(np.any(idx, axis=1))[0][[0, -1]]
+    cmin, cmax = np.where(np.any(idx, axis=0))[0][[0, -1]]
 
     ravg = (rmax + rmin) / 2
     cavg = (cmax + cmin) / 2

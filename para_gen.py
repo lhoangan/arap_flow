@@ -792,7 +792,6 @@ def main():
     print '\t\t{:d} files [Done] | {:.3f} seconds'.format(len(all_paths), time.time() - begin)
 
     #all_paths = all_paths[:10]
-
     lmdb_paths = []
     arap_paths = []
     arap_seg_paths = []
@@ -822,7 +821,11 @@ def main():
         # fit background to the image size
         bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1])
 
-        im1, mk1 = run_1image(p, lmdb_paths, arap_paths, arap_seg_paths)
+        result = run_1image(p, lmdb_paths, arap_paths, arap_seg_paths)
+        if result is None:
+            continue
+        else:
+            im1, mk1  = result
 
         out1 = add_bg(im1, mk1, bgim)
         # output to file
@@ -884,7 +887,6 @@ def main():
     open(osp.join(output_root, 'all_files.list'), 'w').write('\n'.join(out_paths))
     return out_paths
     shutil.rmtree('tmp')
-
 
 def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
 

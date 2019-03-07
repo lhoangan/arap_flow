@@ -159,7 +159,7 @@ def make_tf(w, h, tx, ty, an, sx, sy):
 
 def warp_bg(j, w, h):
 
-    r = rn.uniform(2, 3)
+    r = rn.uniform(1, 1.5)
     bgw = int(w*r)
     bgh = int(h*r)
 
@@ -216,7 +216,8 @@ def warp_bg(j, w, h):
 
     print j,
     sys.stdout.flush()
-    Image.fromarray(convert(fl)).save('/hddstore/hale/bg/{:03d}.png'.format(j))
+    if j % 10 == 0:
+        Image.fromarray(convert(fl)).save('/hddstore/hale/bg/{:03d}.png'.format(j))
 
     return 1
 
@@ -227,7 +228,7 @@ def warp_bg1(w, h):
     # scale the image to 2xlargest translation, then crop it back after warping
     #w, h = bg.size
     #r =  float(min(bg.size)+2*max_t) / min(bg.size)
-    r = rn.uniform(2, 3)
+    r = rn.uniform(1, 2)
     #bg = np.array(bg.resize((int(w*r), int(h*r)), Image.ANTIALIAS))
     bgw = int(w*r)
     bgh = int(h*r)
@@ -309,7 +310,7 @@ for i in range(999999999):
     if i % 100 == 0:
         print '\nStatus: i = {:d} | Counter = {:d} | Time per image = {:f}s'.format(i, counter, (time.time()-begin)/100)
         begin = time.time()
-    w = rn.randint(800, 1500)
+    w = 1200 #rn.randint(800, 1500)
     h = rn.randint(500, w-100)
     counter += warp_bg(i, w, h)#1200, 800)
 

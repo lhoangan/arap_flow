@@ -42,8 +42,8 @@ def param_gen(k, mu, sigma, a, b, p):
     return beta * max(min(np.sign(gamma) * abs(gamma)**k, b), a) + (1-beta)*mu
 
 
-def make_tf(w, h, tx, ty, an, sx, sy):
-    shift_y, shift_x = rn.randint(0, h), rn.randint(0, w)
+def make_tf(w, h, tx, ty, an, sx, sy, shift_x=0, shift_y=0):
+    #shift_y, shift_x = h/2, w/2 #myrn.randint(0, h), myrn.randint(0, w)
     tf_shift = SimilarityTransform(translation=[-shift_x, -shift_y])
     tf_shift_inv = SimilarityTransform(translation=[shift_x, shift_y])
     tf_rotate = tf_shift + (SimilarityTransform(rotation=np.deg2rad(an)) + tf_shift_inv)
@@ -54,8 +54,17 @@ def make_tf(w, h, tx, ty, an, sx, sy):
 
 def warp_bg(bg, w, h):
 
-    X, Y = np.meshgrid(np.arange(0, bg.shape[1]), np.arange(0, bg.shape[0]))
+    # random crop background
+    sr = myrn.randint(0, bg.shape[0]-h)
+    sc = myrn.randint(0, bg.shape[1]-w)
+    bg = bg[sr:sr+h, sc:sc+w, :]
+
+    X, Y = np.meshgrid(np.arange(0, w), np.arange(0, h))
     grid = np.dstack((X, Y))
+
+    grid1 = np.pad(grid, [(h, h), (w, w), (0, 0)], mode='reflect', reflect_type='odd')
+    bg1 = np.pad(bg, [(h, h), (w, w), (0, 0)], mode='reflect', reflect_type='evn')
+    rot_center_y, rot_center_x = h+h/2, w+w/2#myrn.randint(h, 2*h), myrn.randint(w, 2*w)
 
     while True:
 
@@ -65,15 +74,18 @@ def warp_bg(bg, w, h):
         sx = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
         sy = param_gen(2, 1, 0.1, 0.93, 1.07, 0.6)
 
-        tform = make_tf(w, h, tx, ty, an, sx, sy)
+        tform = make_tf(w, h, tx, ty, an, sx, sy, rot_center_x, rot_center_y)
         #form = AffineTransform(translation=(tx, ty), scale=(sx, sy), rotation=radians(an))
-        grid_ = warp(grid.astype(np.float32), tform.inverse, order=1,
-                mode='constant', cval=-WARP_CONST)
-        bg2 = warp(bg.astype(np.float32), tform.inverse, order=1)
+        grid_ = warp(grid1.astype(np.float32), tform, order=1)[h:2*h, w:2*w, :]
+        bg2 = warp(bg1.astype(np.float32), tform.inverse, order=1)[h:2*h, w:2*w, :]
         bgfl = grid_ - grid
 
         assert bgfl.shape[:-1] == bg2.shape[:-1], 'Warped BG and Flow has different size '\
                 'is {} vs. {}'.format(str(bgfl.shape[:-1]), str(bg2.shape[:-1]))
+
+
+
+        return bg, bg2.astype(np.uint8), bgfl
 
         # cropping from invalid regions
         # getting the available regions
@@ -113,7 +125,7 @@ def prepare_bg(bg, target_size, static=True):
     hmax = max(bgh, imh)
     wmax = max(bgw, imw)
     # scale the background to at least 2 times larger than the image
-    r = rn.uniform(2, 2.5) * max(float(hmax)/bgh, float(wmax)/bgw)
+    r = 1#myrn.uniform(1, 1.5) * max(float(hmax)/bgh, float(wmax)/bgw)
     bgim = bgim.resize((int(bgw*r), int(bgh*r)), Image.ANTIALIAS)
     bg = np.array(bgim)
 
@@ -121,7 +133,7 @@ def prepare_bg(bg, target_size, static=True):
         bg, bg2, bgfl = warp_bg(bg, imw, imh)
     else:
         # random position to crop
-        sy, sx = rn.randint(0, bg.shape[0] - imh), rn.randint(0, bg.shape[1] - imw)
+        sy, sx = myrn.randint(0, bg.shape[0] - imh), myrn.randint(0, bg.shape[1] - imw)
         # cropping
         bg = bg[sy:(sy+imh), sx:(sx+imw), :]
         bg2 = bg.copy()
@@ -1204,6 +1216,9 @@ def one_for_all(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root, flo_
             tmp_paths.remove(bgpath)
             try:
                 bgim = np.array(Image.open(bgpath))
+                if bgim.shape[0] < 768 or bgim.shape[1] < 1024:
+                    bg_paths.remove(bgpath)
+                    continue
                 if bgim.shape[2] == 3:
                     break
             except:
@@ -1212,7 +1227,7 @@ def one_for_all(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root, flo_
             bg_paths.remove(bgpath)
 
         # fit background to the image size
-        bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1])
+        bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1], static=False)
 
         path_segments = [] # keeping track of path set for each object for bg pasting
         # for each object in n objects to be put in this image

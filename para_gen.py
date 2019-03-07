@@ -452,6 +452,9 @@ def preprocess(p):
         p['rgb1_org'] = p['rgb1_gen']
         p['msk1_org'] = p['msk1_gen']
 
+    if 'rgb2_org' not in p or 'msk2_org' not in p:
+        return np.array(im1), np.array(mk1)
+
     preprocessed, im2, mk2 = scale_rotate(p['rgb2_org'], p['msk2_org'])
     if preprocessed:
         im2.save(p['rgb2_gen'])
@@ -695,6 +698,180 @@ def generic_pipeline(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root,
 
         iframe += 1
         print 'Finish 1 file in: ', time.time() - begin, ' s'
+
+
+def create_segaffine(frnum, tonum):
+    '''
+        objs:   list of DAVIS sequences, within each sequence must be the images
+        root:   path to where all the sequences are
+    '''
+
+    root = 'data/DAVIS/orgRGB'
+    objs = os.listdir(root)
+
+    rgb_org = osp.join(input_root, orgcolor)
+    msk_org = osp.join(input_root, orgmask)
+
+    rgb_root = osp.join(output_root, color_dir)
+    msk_root = osp.join(output_root, mask_dir)
+
+    # TODO have the file pattern input from argument
+    reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
+
+    tmp_paths = []
+    bg_paths = []
+    print "Scanning background directory... ",
+    begin = time.time()
+    for bgroot, _, files in os.walk(bg_dir):
+        for f in files:
+            if '.PNG' not in f.upper() and \
+                '.JPG' not in f.upper() and  '.JPEG' not in f.upper():
+                continue
+            bg_paths.append(osp.join(bgroot, f))
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+
+    # for each image in the whole dataset
+    iframe = frnum
+    while True:
+        begin = time.time()
+        if iframe == tonum:
+            break
+        print 'Processing file number: ',iframe
+
+        nobjs = rn.randint(8, 12)
+        pickeds = []
+
+
+        # load background
+        while True:
+            if len(tmp_paths) == 0:
+                tmp_paths = sorted(bg_paths[:]) # copy
+            bgpath = rn.choice(tmp_paths)
+            tmp_paths.remove(bgpath)
+            try:
+                bgim = np.array(Image.open(bgpath))
+                if bgim.shape[2] == 3:
+                    break
+            except:
+                pass
+            # if something wrong happens
+            bg_paths.remove(bgpath)
+
+        # fit background to the image size
+        bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1])
+
+        ngpus = len(flags.gpu)
+        gpu_queue = Queue(ngpus)
+        for g in flags.gpu:
+            gpu_queue.put(g)
+        procs = {}
+        path_segments = [] # keeping track of path set for each object for bg pasting
+        # for each object in n objects to be put in this image
+        for iobj in range(nobjs):
+
+            # sampling an object without replacement
+            while True:
+                seq = rn.choice(objs)
+                if seq not in pickeds:
+                    pickeds.append(seq)
+                    break
+
+            # randomly pick a file
+            files = sorted([f for f in os.listdir(osp.join(root, seq))
+                        if reg.search(f) is not None])
+            f1 = rn.choice(files[:-fd-1])
+            f, ext = osp.splitext(f1) # strip extension path
+
+            # generating arap path set
+            entry = {}
+            entry['rgb1_gen'] = osp.abspath(osp.join(rgb_root, seq, f+'.png'))
+            entry['msk1_gen'] = osp.abspath(osp.join(msk_root, seq, f+'.png'))
+
+            entry['rgb1_org'] = osp.abspath(osp.join(rgb_org, seq, f1))
+            entry['msk1_org'] = osp.abspath(osp.join(msk_org, seq, f+'.png'))
+
+
+            path_segments.append(run_1affine(entry)) # im1, mk1, im2, mk2, flo
+
+        # wait for all the threads to finish
+        for k in procs:
+            print 'Waiting for threads ',k,' to finish'
+            procs[k].join()
+
+        if len(path_segments) == 0:
+            continue
+
+        for im1, mk1, im2, mk2, flo in path_segments:
+            bgim = add_bg(im1, mk1, bgim)
+            bgim2 = add_bg(im2, mk2, bgim2)
+            bgflo = add_bg(flo, mk1, bgflo)
+
+
+        outpath = osp.join(output_root, 'data')
+        if not osp.isdir(outpath):
+            os.makedirs(outpath)
+        Image.fromarray(bgim).save(osp.join(outpath, '{:05d}_1.png'.format(iframe)))
+        Image.fromarray(bgim2).save(osp.join(outpath, '{:05d}_2.png'.format(iframe)))
+        sintel_io.flow_write(osp.join(outpath, '{:05d}_f.flo'.format(iframe)),bgflo)
+
+        iframe += 1
+        print 'Finish 1 file in: ', time.time() - begin, ' s'
+
+def run_1affine(p):
+
+    im, mk = preprocess(p)
+    h, w = mk.shape
+
+    # paste the image to a larger frame
+    im1 = np.zeros((h*3, w*3, 3))
+    mk1 = np.zeros((h*3, w*3))
+
+    im1[h:h*2,w:w*2,:] = im[:]
+    mk1[h:h*2,w:w*2] = mk[:]
+
+    # do all the transforms on the larger frame
+    im2 = np.zeros_like(im1)
+    mk2 = np.zeros_like(mk1)
+    flo = np.zeros(list(mk1.shape) + [2])
+
+    gr  = np.dstack(np.meshgrid(np.arange(0, im1.shape[1]),
+                    np.arange(0, im1.shape[0])))
+    for s in np.unique(mk1):
+
+        if s == 0:
+            continue
+
+        tx = param_gen(3, 0, 2.3, -120, 120, 1)
+        ty = param_gen(3, 0, 2.3, -120, 120, 1)
+        an = param_gen(2, 0, 2.3, -30, 30, 0.7) # in degree
+        sx = param_gen(2, 1, 0.18, 0.8, 1.2, 0.7)
+        sy = param_gen(2, 1, 0.18, 0.8, 1.2, 0.7)
+
+        tform = make_tf(im1.shape[1], im1.shape[0], tx, ty, an, sx, sy)
+        im_ = warp(im1.astype(np.float32), tform.inverse, order=1)
+        mk_ = warp(mk1.astype(np.float32), tform.inverse, order=0)
+        gr_ = warp(gr.astype(np.float32), tform.inverse, order=1)
+        fl_ = gr_ - gr
+
+        idx = mk_==s
+        im2[idx] = im_[idx]
+        mk2[idx] = mk_[idx]
+        flo[mk1==s] = fl_[mk1==s]
+
+    # shift the image
+    idx = mk != 0
+    rmin, rmax = np.where(np.any(idx, axis=1))[0][[0, -1]]
+    cmin, cmax = np.where(np.any(idx, axis=0))[0][[0, -1]]
+
+    # row and column displacement from the segment centroid
+    rd = rn.randint(0, mk.shape[0]) - (rmax + rmin) / 2
+    cd = rn.randint(0, mk.shape[1]) - (cmax + cmin) / 2
+
+    return  im1[h+rd:h*2+rd, w+cd:w*2+cd, :].astype(np.uint8),\
+            mk1[h+rd:h*2+rd, w+cd:w*2+cd].astype(np.uint8),\
+            im2[h+rd:h*2+rd, w+cd:w*2+cd, :].astype(np.uint8),\
+            mk2[h+rd:h*2+rd, w+cd:w*2+cd].astype(np.uint8),\
+            flo[h+rd:h*2+rd, w+cd:w*2+cd, :]
 
 def main():
 
@@ -979,7 +1156,332 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
 
     return im1, mk1
 
+def one_for_all(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root, flo_root, rgb_root, msk_root, wco_root, wmk_root):
+    '''
+        objs:   list of DAVIS sequences, within each sequence must be the images
+        root:   path to where all the sequences are
+    '''
 
+    myrn = rn.Random()
+    myrn.seed(1000)
+
+    root = 'data/DAVIS/orgRGB'
+    objs = os.listdir(root)
+
+    # TODO have the file pattern input from argument
+    reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
+
+    tmp_paths = []
+    bg_paths = []
+    print "Scanning background directory... ",
+    begin = time.time()
+    for bgroot, _, files in os.walk(bg_dir):
+        for f in files:
+            if '.PNG' not in f.upper() and \
+                '.JPG' not in f.upper() and  '.JPEG' not in f.upper():
+                continue
+            bg_paths.append(osp.join(bgroot, f))
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+
+    # for each image in the whole dataset
+    iframe = frnum
+    while True:
+        begin = time.time()
+        if iframe == tonum:
+            break
+        print 'Processing file number: ',iframe
+
+        nobjs = myrn.randint(12, 18)
+        print 'Number of objects: ', nobjs
+        pickeds = []
+
+
+        # load background
+        while True:
+            if len(tmp_paths) == 0:
+                tmp_paths = sorted(bg_paths[:]) # copy
+            bgpath = myrn.choice(tmp_paths)
+            tmp_paths.remove(bgpath)
+            try:
+                bgim = np.array(Image.open(bgpath))
+                if bgim.shape[2] == 3:
+                    break
+            except:
+                pass
+            # if something wrong happens
+            bg_paths.remove(bgpath)
+
+        # fit background to the image size
+        bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1])
+
+        path_segments = [] # keeping track of path set for each object for bg pasting
+        # for each object in n objects to be put in this image
+        for iobj in range(nobjs):
+
+            # sampling an object without replacement
+            while True:
+                seq = myrn.choice(objs)
+                if seq not in pickeds:
+                    pickeds.append(seq)
+                    break
+
+            # randomly pick a file
+            files = sorted([f for f in os.listdir(osp.join(root, seq))
+                        if reg.search(f) is not None])
+
+            print 'Sequence: ',seq
+
+            # sampling a frame distance
+            fd = myrn.randint(1, 5) # TODO: incorporate into output_root
+            print 'Frame distance: ',fd
+
+            while True:
+                f1 = myrn.choice(files[:-fd-1])
+                f, ext = osp.splitext(f1) # strip extension path
+                # getting frame number
+                num = reg.search(f1)
+                if num is None:
+                    continue
+                n = '{:0'+str(len(num.group(1)))+'d}'
+                # getting next frame according to frame distance fd
+                n = n.format(int(num.group(1))+fd)
+                f2 = f.replace(num.group(1), n)
+
+                if f2+ext in files:
+                    break
+
+                ## TODO sanity check if all required files exist for the pair of chosen frames
+                #if not osp.exists(osp.join(msk_org, seq, f +'.png')):
+                #    continue
+
+            ## skipping if out of second frame
+            #if not osp.exists(osp.join(rgb_org, seq, f2+ext)) or \
+            #    not osp.exists(osp.join(msk_org, seq, f2+'.png')):
+            #    continue
+
+
+            fdn = 'fd{:d}'.format(fd)
+            rgb_org = osp.join(input_root, orgcolor)
+            msk_org = osp.join(input_root, orgmask)
+            cst_root = osp.join(output_root, fdn, constraints_dir)
+            flo_root = osp.join(output_root, fdn, flow_dir)
+
+            rgb_root = osp.join(output_root, fdn, color_dir)
+            msk_root = osp.join(output_root, fdn, mask_dir)
+            wco_root = osp.join(output_root, fdn, wrgb_dir)
+            wmk_root = osp.join(output_root, fdn, wMask_dir)
+
+
+
+            # generating arap path set
+            entry = {}
+            entry['rgb1_gen'] = osp.abspath(osp.join(rgb_root, seq, f+'.png'))
+            entry['msk1_gen'] = osp.abspath(osp.join(msk_root, seq, f+'.png'))
+            entry['rgb2_gen'] = osp.abspath(osp.join(wco_root, seq, f+'.png'))
+            entry['msk2_gen'] = osp.abspath(osp.join(wmk_root, seq, f+'.png'))
+
+            entry['cstr_tmp'] = osp.abspath(osp.join(cst_root, seq, f+'.txt'))
+            entry['flow_gen'] = osp.abspath(osp.join(flo_root, seq, f+'.flo'))
+
+            entry['rgb1_org'] = osp.abspath(osp.join(rgb_org, seq, f1))
+            entry['msk1_org'] = osp.abspath(osp.join(msk_org, seq, f+'.png'))
+            entry['rgb2_org'] = osp.abspath(osp.join(rgb_org, seq, f2+ext))
+            entry['msk2_org'] = osp.abspath(osp.join(msk_org, seq, f2+'.png'))
+
+            for k in entry:
+                if not osp.exists(entry[k]):
+                    break
+            else:
+                # loading data from entry
+                # pasting onto to the background
+                # saving to file
+
+                im1, mk1, im2, mk2, fl, x, y = load_scale(entry, 1024, 768, myrn)
+                if flags.affine:
+                    im2, mk2, fl = run_1affine1(im1, mk1, x, y)
+                path_segments.append((im1, mk1, im2, mk2, fl))
+                continue
+
+        if len(path_segments) == 0:
+            continue
+
+        for im1, mk1, im2, mk2, flo in path_segments:
+            bgim = add_bg(im1, mk1, bgim)
+            bgim2 = add_bg(im2, mk2, bgim2)
+            bgflo = add_bg(flo, mk1, bgflo)
+
+        outpath = osp.join(output_root, 'test_all41')
+        if not osp.isdir(outpath):
+            os.makedirs(outpath)
+        Image.fromarray(bgim).save(osp.join(outpath, '{:05d}_1.png'.format(iframe)))
+        Image.fromarray(bgim2).save(osp.join(outpath, '{:05d}_2.png'.format(iframe)))
+        sintel_io.flow_write(osp.join(outpath, '{:05d}_f.flo'.format(iframe)),bgflo)
+
+        iframe += 1
+        print 'Finish 1 file in: ', time.time() - begin, ' s'
+
+def load_scale(ps, tw, th, myrn):
+
+    im1 = np.array(Image.open(ps['rgb1_gen']))
+    mk1 = np.array(Image.open(ps['msk1_gen']))
+    im2 = np.array(Image.open(ps['rgb2_gen']))
+    mk2 = np.array(Image.open(ps['msk2_gen']))
+    fl = np.dstack(sintel_io.flow_read(ps['flow_gen']))
+
+    im1, mk1, im2, mk2, fl = prepare_segment(im1, mk1, myrn, im2=im2, mk2=mk2, flo=fl)
+    sh, sw, _ = im1.shape
+
+    # paste the segment to a larger frame, at random position x, y
+    y, x = myrn.randint(0, th-sh), myrn.randint(0, tw-sw)
+    print "Pasted to: ", y, x
+
+    im1_ = np.zeros((th, tw, 3))
+    mk1_ = np.zeros((th, tw))
+    im2_ = np.zeros((th, tw, 3))
+    mk2_ = np.zeros((th, tw))
+    flo_ = np.zeros((th, tw, 2))
+
+    im1_[y:y+sh,x:x+sw,:] = im1[:]
+    mk1_[y:y+sh,x:x+sw] = mk1[:]
+    im2_[y:y+sh,x:x+sw, :] = im2[:]
+    mk2_[y:y+sh,x:x+sw] = mk2[:]
+    flo_[y:y+sh,x:x+sw, :] = fl[:]
+
+    return  im1_.astype(np.uint8),\
+            mk1_.astype(np.uint8),\
+            im2_.astype(np.uint8),\
+            mk2_.astype(np.uint8), flo_, x, y
+
+
+def prepare_segment(im, mk, myrn, bgval=0, im2=None, mk2=None, flo=None):
+
+    mk2 = mk2 if mk2 is not None else np.zeros_like(mk) + bgval
+    idx = np.logical_or(mk != bgval, mk2 != bgval)
+    rmin, rmax = np.where(np.any(idx, axis=1))[0][[0, -1]]
+    cmin, cmax = np.where(np.any(idx, axis=0))[0][[0, -1]]
+
+    im1 = im[rmin:rmax, cmin:cmax, :]
+    mk1 = mk[rmin:rmax, cmin:cmax]
+    sh, sw = rmax - rmin, cmax - cmin # segment size
+
+    # pick a random size within the  given range using flownet's formula
+    ts = max(50, min(640, myrn.gauss(200, 200))) # target size
+    r  = float(ts) / max(sh, sw) # ratio
+    print 'Random size: ', ts, ' Ratio: ', r
+
+    # resizing to new width and height
+    nw, nh = int(sw*r), int(sh*r)
+    im1 = np.array(Image.fromarray(im1).resize((nw, nh), Image.ANTIALIAS))
+    mk1 = np.array(Image.fromarray(mk1).resize((nw, nh), Image.NEAREST))
+
+    output = im1, mk1
+    if im2 is not None:
+        im2 = im2[rmin:rmax, cmin:cmax, :]
+        im2 = np.array(Image.fromarray(im2).resize((nw, nh), Image.ANTIALIAS))
+        output = output + (im2,)
+    if mk2.sum() > 0:
+        mk2 = mk2[rmin:rmax, cmin:cmax]
+        mk2 = np.array(Image.fromarray(mk2).resize((nw, nh), Image.NEAREST))
+        output = output + (mk2,)
+    if flo is not None:
+        flo = flo[rmin:rmax, cmin:cmax, :]
+        flo = np.dstack((np.array(Image.fromarray(flo[...,0]).resize((nw, nh), Image.ANTIALIAS)),
+        np.array(Image.fromarray(flo[...,1]).resize((nw, nh), Image.ANTIALIAS))))
+        flo = flo * r # scale the flow value as well
+        output = output + (flo,)
+
+    return output
+
+def run_1affine1(im, mk, x, y):
+
+    #im1 = np.array(Image.open(ps['rgb1_gen']))
+    #mk1 = np.array(Image.open(ps['msk1_gen']))
+    #im2 = np.array(Image.open(ps['rgb2_gen']))
+    #mk2 = np.array(Image.open(ps['msk2_gen']))
+    #fl = np.dstack(sintel_io.flow_read(ps['flow_gen']))
+
+    #im, mk, _, _, _ = prepare_segment(im1, mk1, im2=im2, mk2=mk2, flo=fl)
+    #sh, sw, _ = im.shape
+
+
+    ## paste the segment to a larger frame, at random position x, y
+    #y, x = rn.randint(0, th-sh), rn.randint(0, tw-sw)
+    #print "Pasted to: ", y, x
+
+    #im1 = np.zeros((th, tw, 3))
+    #mk1 = np.zeros((th, tw))
+    #im1[y:y+sh,x:x+sw,:] = im[:]
+    #mk1[y:y+sh,x:x+sw] = mk[:]
+
+    idx = mk != 0
+    rmin, rmax = np.where(np.any(idx, axis=1))[0][[0, -1]]
+    cmin, cmax = np.where(np.any(idx, axis=0))[0][[0, -1]]
+
+    im1 = im[rmin:rmax, cmin:cmax, :]
+    mk1 = mk[rmin:rmax, cmin:cmax]
+    sh, sw = rmax - rmin, cmax - cmin # segment size
+
+    im2 = np.zeros_like(im)
+    mk2 = np.zeros_like(mk)
+    flo = np.zeros(mk.shape + (2,))
+
+    h, w, _ = im.shape
+
+    up, lp = min(y, max(300, int(sh/2))), min(x, max(300,int(sw/2)))
+    dp, rp = min(h-y-sh, max(300, int(sh/2))), min(w-x-sw, max(300,int(sw/2)))
+    pad = [ [up, dp], [lp, rp]] # up, down, left, right pad
+    im1 = np.pad(im1, pad+[[0, 0]], mode='constant', constant_values=0)
+    mk1 = np.pad(mk1, pad, mode='constant', constant_values=0)
+    gr  = np.dstack(np.meshgrid(np.arange(0, im1.shape[1]), np.arange(0, im1.shape[0])))
+    gr[..., 0] -= up
+    gr[..., 1] -= lp
+
+
+    fsup, fslp = y-up, x-lp
+    fsdp, fsrp = h-(y+sh+dp), w-(x+sw+rp)
+    fspad = [[fsup, fsdp],[fslp, fsrp]] # padded to full size of input image im
+
+
+    #hh, ww, _ = im1.shape
+
+    #sr, sc = max(0, y-r), max(0, x-c)
+    #h1 = hh - (abs(y-r) - sr)
+    #w1 = ww - (abs(x-c) - sc)
+    #er, ec = min(h, sr+h1), min(w, sc+w1)
+    #im22 = im2[sr:er, sc:ec, :]
+    #mk22 = mk2[sr:er, sc:ec]
+
+    #sr1, sc1 = max(0, r-y), max(0, c-x)
+    #er1, ec1 = min(hh, sr1+h1
+
+
+
+    for s in np.unique(mk1):
+        if s == 0:
+            continue
+
+        tx = param_gen(3, 0, 2.3, -120, 120, 1)
+        ty = param_gen(3, 0, 2.3, -120, 120, 1)
+        an = param_gen(2, 0, 2.3, -30, 30, 0.7) # in degree
+        sx = param_gen(2, 1, 0.18, 0.8, 1.2, 0.7)
+        sy = param_gen(2, 1, 0.18, 0.8, 1.2, 0.7)
+
+        tform = make_tf(im1.shape[1], im1.shape[0], tx, ty, an, sx, sy)
+        im_ = warp(im1.astype(np.float32), tform.inverse, order=1)
+        mk_ = warp(mk1.astype(np.float32), tform.inverse, order=0)
+        gr_ = warp(gr.astype(np.float32), tform.inverse, order=1)
+        fl_ = gr_ - gr
+
+        im_ = np.pad(im_, fspad+[[0, 0]], mode='constant')
+        mk_ = np.pad(mk_, fspad, mode='constant')
+        fl_ = np.pad(fl_, fspad+[[0,0]], mode='constant')
+
+        idx = mk_==s
+        im2[idx] = im_[idx]
+        mk2[idx] = mk_[idx]
+        flo[mk==s] = fl_[mk==s]
+
+    return  im2.astype(np.uint8), mk2.astype(np.uint8), flo
 
 
 if __name__ == "__main__":
@@ -1006,7 +1508,7 @@ if __name__ == "__main__":
             help='2-tuple of [width] [space] [height] (in this order) '
             'to which all images are resized. '
             'Omit to keep original dimensions of images.')
-    parser.add_argument('--range', nargs=2, required=True,
+    parser.add_argument('--range', nargs=2, required=False,  # TODO this is required for generic pipeline
             help='2-tuple of [width] [space] [height] (in this order) '
             'to which all images are resized. ')
     parser.add_argument('--fd', type=int, default=1,
@@ -1038,7 +1540,12 @@ if __name__ == "__main__":
 
     input_root = flags.input.rstrip(osp.sep)
     output_root = flags.output.rstrip(osp.sep)
+    orgmask = flags.orgmask
 
     logging.basicConfig(filename='example.log',level=logging.DEBUG)
-    #main()
-    generic_pipeline(int(flags.range[0]), int(flags.range[1]))
+    if flags.single:
+        main()
+    elif flags.all41:
+        one_for_all(int(flags.range[0]), int(flags.range[1]))
+    else:
+        generic_pipeline(int(flags.range[0]), int(flags.range[1]))

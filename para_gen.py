@@ -746,7 +746,11 @@ def main():
     begin = time.time()
     for root, dirs, _ in os.walk(rgb_org):
         # check if the folder contain files of the wanted pattern
-        for d in dirs:
+        if flags.range is None:
+            flags.range = 0, len(dirs)
+        else:
+            flags.range = int(flags.range[0]), int(flags.range[1])
+        for d in sorted(dirs)[flags.range[0]:flags.range[1]]:
             files = [f for f in os.listdir(osp.join(root, d))
                         if reg.search(f) is not None]
             for f1 in files:
@@ -760,7 +764,7 @@ def main():
 
                 # getting frame number
                 num = reg.search(f1)
-                if num is None:
+                if num is None or int(num.group(1)) % int(flags.step) != 0:
                     continue
                 n = '{:0'+str(len(num.group(1)))+'d}'
 
@@ -1013,6 +1017,16 @@ if __name__ == "__main__":
             help='Path to built ARAP binary file to be run, default=./arap-deform')
     parser.add_argument('--dm_bin', default='./dm',
             help='Path to built deep matching binary file to be run, default=./dm')
+    parser.add_argument('--affine', action='store_true', default=False,
+            help='Create random affine transformation for object segments')
+    parser.add_argument('--all41', action='store_true', default=False,
+            help='Create random affine transformation for object segments')
+    parser.add_argument('--single', action='store_true', default=False,
+            help='Create random affine transformation for object segments')
+    parser.add_argument('--orgmask', type=str, default='orgMasks', required=False,
+            help='Subfolder for original masks')
+    parser.add_argument('--step', type=int, default=1, required=False,
+            help='Frame step, 1 to run all the dataset')
     flags = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(flags.gpu)

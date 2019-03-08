@@ -1565,6 +1565,8 @@ if __name__ == "__main__":
     orgmask = flags.orgmask
 
     logging.basicConfig(filename='example.log',level=logging.DEBUG)
+    myrn = rn.Random()
+    myrn.seed(int(flags.range[0]))
     if flags.single:
         main()
     elif flags.all41:

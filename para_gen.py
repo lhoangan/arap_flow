@@ -1004,6 +1004,9 @@ def main():
             tmp_paths.remove(bgpath)
             try:
                 bgim = np.array(Image.open(bgpath))
+                if bgim.shape[0] < 768 or bgim.shape[1] < 1024:
+                    bg_paths.remove(bgpath)
+                    continue
                 if bgim.shape[2] == 3:
                     break
             except:

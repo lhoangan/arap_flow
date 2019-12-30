@@ -78,6 +78,22 @@ Flags:
 - size [width] [height] : one size to scale all images to, required
 
 
+## Example running YoutubeVOS
+
+
+
+
+run
+
+`export INCLUDE_PATH=/usr/local/cuda-7.5/include`
+
+`export CUDA_HOME=/usr/local/cuda-7.5`
+
+`export LD_LIBRARY_PATH=/home/hle1/anaconda2/lib:$LD_LIBRARY_PATH`
+
+`python para_gen.py --gpu 0 1 2 3 --input data/YoutubeVOS/org/ --output data/YoutubeVOS/out/ --fd 1 --outname fd1 --size 854 480 --multseg --single --seqs data/YoutubeVOS/seq_shortlist`
+
+
 
 
 ## Pipeline

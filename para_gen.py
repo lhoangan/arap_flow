@@ -3,7 +3,8 @@ from skimage.transform import warp, AffineTransform, SimilarityTransform
 import argparse, shutil, logging
 from math import sqrt
 from PIL import Image
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, cpu_count
+from joblib import Parallel, delayed
 from subprocess import call
 import sintel_io
 
@@ -512,6 +513,7 @@ def generic_pipeline(frnum, tonum):#num, objs, root, rgb_org, msk_org, cst_root,
     '''
 
     root = 'data/DAVIS/orgRGB'
+    root = 'data/YoutubeVOS/org/orgRGB'
     objs = os.listdir(root)
 
     # TODO have the file pattern input from argument
@@ -885,7 +887,60 @@ def run_1affine(p):
             mk2[h+rd:h*2+rd, w+cd:w*2+cd].astype(np.uint8),\
             flo[h+rd:h*2+rd, w+cd:w*2+cd, :]
 
-def main():
+def run_replace(i, p, tmp_paths, bg_paths):
+
+    print '{:.3f}%'.format(float(i) * 100 / 6000)
+    # load background
+    while True:
+        if len(tmp_paths) == 0:
+            tmp_paths = sorted(bg_paths[:]) # copy
+        bgpath = rn.choice(tmp_paths)
+        tmp_paths.remove(bgpath)
+        try:
+            bgim = np.array(Image.open(bgpath))
+            if bgim.shape[0] < 768 or bgim.shape[1] < 1024:
+                bg_paths.remove(bgpath)
+                continue
+            if bgim.shape[2] == 3:
+                break
+        except:
+            pass
+        # if something wrong happens
+        bg_paths.remove(bgpath)
+
+    for k in p:
+        if not osp.exists(p[k]):
+            print 'Not found: ' + p[k]
+            break
+    else:
+        print 'Found sequence and frame exists' + p['rgb1_org']
+        # loading data from entry
+        # pasting onto to the background # TODO
+        # saving to file
+        bgim, bgim2, bgflo = prepare_bg(bgim, flags.size[::-1], static=False)
+
+        try:
+            im1 = np.array(Image.open(p['rgb1_gen']))
+            mk1 = np.array(Image.open(p['msk1_gen']))
+            flo = np.dstack(sintel_io.flow_read(p['flow_gen']))
+            im2 = np.array(Image.open(p['rgb2_gen']))
+            mk2 = np.array(Image.open(p['msk2_gen']))
+            out1 = add_bg(im1, mk1, bgim)
+            Image.fromarray(out1).save(p['rgb1_gen'])
+            flo = add_bg(flo, mk1, bgflo)
+            sintel_io.flow_write(p['flow_gen'], flo)
+            out2 = add_bg(im2, mk2, bgim2)
+            Image.fromarray(out2).save(p['rgb2_gen'])
+
+        except:
+            for k in p:
+                if osp.exists(p[k]):
+                    os.remove(p[k])
+            return
+
+
+
+def replace_BG():
 
     rgb_org = osp.join(input_root, orgcolor)
     msk_org = osp.join(input_root, orgmask)
@@ -934,6 +989,125 @@ def main():
     sys.stdout.flush()
     begin = time.time()
     for root, dirs, _ in os.walk(rgb_org):
+        # check if the folder contain files of the wanted pattern
+        if flags.range is None:
+            flags.range = 0, len(dirs)
+        else:
+            flags.range = int(flags.range[0]), int(flags.range[1])
+        for d in sorted(dirs)[flags.range[0]:flags.range[1]]:
+            files = [f for f in os.listdir(osp.join(root, d))
+                        if reg.search(f) is not None]
+            for f1 in files:
+
+                seq = root.replace(rgb_org, '').strip(osp.sep)
+                seq = osp.join(seq, d)
+                f, ext = osp.splitext(f1) # strip extension path
+
+                if not osp.exists(osp.join(msk_org, seq, f +'.png')):
+                    continue
+
+                # getting frame number
+                num = reg.search(f1)
+                if num is None or int(num.group(1)) % int(flags.step) != 0:
+                    continue
+                n = '{:0'+str(len(num.group(1)))+'d}'
+
+                # getting next frame according to frame distance fd
+                nxt = int(num.group(1))+flags.fd
+                f2 = f.replace(num.group(1), n.format(nxt))
+                # skipping if out of second frame
+                if not osp.exists(osp.join(rgb_org, seq, f2+ext)) or \
+                    not osp.exists(osp.join(msk_org, seq, f2+'.png')):
+                    continue
+
+                entry = {}
+                entry['rgb1_gen'] = osp.abspath(osp.join(rgb_root, seq, f+'.png'))
+                entry['msk1_gen'] = osp.abspath(osp.join(msk_root, seq, f+'.png'))
+                entry['rgb2_gen'] = osp.abspath(osp.join(wco_root, seq, f+'.png'))
+                entry['msk2_gen'] = osp.abspath(osp.join(wmk_root, seq, f+'.png'))
+
+                entry['cstr_tmp'] = osp.abspath(osp.join(cst_root, seq, f+'.txt'))
+                entry['flow_gen'] = osp.abspath(osp.join(flo_root, seq, f+'.flo'))
+
+                entry['rgb1_org'] = osp.abspath(osp.join(rgb_org, seq, f1))
+                entry['msk1_org'] = osp.abspath(osp.join(msk_org, seq, f+'.png'))
+                entry['rgb2_org'] = osp.abspath(osp.join(rgb_org, seq, f2+ext))
+                entry['msk2_org'] = osp.abspath(osp.join(msk_org, seq, f2+'.png'))
+
+                if not flags.resume or not osp.exists(entry['flow_gen']):
+                    all_paths.append(entry)
+
+    print '\t\t{:d} files [Done] | {:.3f} seconds'.format(len(all_paths), time.time() - begin)
+
+    #all_paths = all_paths[:10]
+    lmdb_paths = []
+    arap_paths = []
+    arap_seg_paths = []
+
+
+    fail_list = Parallel(n_jobs=45)(delayed(run_replace)(
+        i, p, tmp_paths, bg_paths)for i, p in enumerate(all_paths))
+
+    #for i, p in enumerate(all_paths):
+    #    print '{:.3f}%'.format(float(i) * 100 / len(all_paths))
+
+    #    run_replace(p)
+
+def main():
+
+    global output_root
+    output_root = osp.join(output_root, flags.outname)
+
+    rgb_org = osp.join(input_root, orgcolor)
+    msk_org = osp.join(input_root, orgmask)
+    cst_root = osp.join(output_root, constraints_dir)
+    flo_root = osp.join(output_root, flow_dir)
+
+    rgb_root = osp.join(output_root, color_dir)
+    msk_root = osp.join(output_root, mask_dir)
+    wco_root = osp.join(output_root, wrgb_dir)
+    wmk_root = osp.join(output_root, wMask_dir)
+
+    im1paths = dict()
+    im1paths['rgb_root'] = osp.join(input_root, color_dir)
+    im1paths['mask_root'] = osp.join(input_root, mask_dir)
+    im1paths['rgb_out'] = osp.join(output_root, color_dir)
+    im1paths['bgval'] = ARAP_BG
+
+    im2paths = dict()
+    im2paths['rgb_root'] = osp.join(output_root, wrgb_dir)
+    im2paths['mask_root'] = osp.join(output_root, wMask_dir)
+    im2paths['rgb_out'] = osp.join(output_root, wrgb_dir)
+    im2paths['bgval'] = 0
+
+    # get list of all background
+    bg_paths = []
+    print "Scanning background directory... ",
+    begin = time.time()
+    for root, _, files in os.walk(bg_dir):
+        for f in files:
+            if '.PNG' not in f.upper() and \
+                '.JPG' not in f.upper() and  '.JPEG' not in f.upper():
+                continue
+            bg_paths.append(osp.join(root, f))
+    print "\t[Done] | {:.2f} mins".format((time.time()-begin)/60)
+
+    tmp_paths = []
+
+    begin = time.time()
+
+    bgs = []
+    all_paths = []
+    # TODO have the file pattern input from argument
+    reg = re.compile('(\d+)\.jp.?g', flags=re.IGNORECASE) # or put (?i)jp.g
+
+    print 'Scanning data to be processed',
+    sys.stdout.flush()
+    begin = time.time()
+    #for root, dirs, _ in os.walk(rgb_org):
+    root = rgb_org
+    dirs = open(flags.seqs).read().splitlines()
+    if True:
         # check if the folder contain files of the wanted pattern
         if flags.range is None:
             flags.range = 0, len(dirs)
@@ -1095,7 +1269,7 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
 
     if not has_mask(p['msk1_org'], p['msk2_org']):
         cleanup(p)
-        print 'File FAILED!'
+        print 'FAILED: Missing masks:\n\t', p['msk1_org'], '\n\t', p['msk2_org']
         return None
 
     run_matching(p['rgb1_org'], p['rgb2_org'],
@@ -1107,6 +1281,9 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
     cstrs = []
     valids = [] # valid segment number in case of multiple segment
     # check the constraints
+    if not flags.multseg:
+        mk1 = (mk1 > 0).astype(np.uint8)
+        mk2 = (mk2 > 0).astype(np.uint8)
     for line in cstr_lines:
         x1, y1, x2, y2 = [int(l) for l in line.split(' ')[:4]]
 
@@ -1117,7 +1294,7 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
     open(p['cstr_tmp'], 'w').write('\n'.join([str(len(cstrs))] + cstrs))
     if len(cstrs) == 0:
         cleanup(p)
-        print 'File FAILED!'
+        print 'FAILED: Zero valid contraints: ', p['cstr_tmp']
         return None
 
     # Convert mask
@@ -1134,7 +1311,14 @@ def run_1image(p, lmdb_paths, arap_paths, arap_seg_paths):
     else:
         arap_path = make_arap_path(p)
         seg_paths = []
-        for s in np.unique(valids): # only check the valid segment (segment with at least 1 constraint)
+        valids = np.unique(valids)
+        # when not all the segments in mk1 are valid
+
+        if sorted(valids) != sorted(np.unique(mk1)):
+            for s in np.unique(mk1):
+                if s not in valids:
+                    mk1[mk1 == s] = 0
+        for s in valids: # only check the valid segment (segment with at least 1 constraint)
             if s == 0:
                 continue
             p_ = replace_ext(p, s, keep_orgs=['rgb1_gen', 'cstr_tmp'])
@@ -1541,6 +1725,8 @@ if __name__ == "__main__":
             help='Path to built deep matching binary file to be run, default=./dm')
     parser.add_argument('--affine', action='store_true', default=False,
             help='Create random affine transformation for object segments')
+    parser.add_argument('--addbg', action='store_true', default=False,
+            help='Add background')
     parser.add_argument('--all41', action='store_true', default=False,
             help='Create random affine transformation for object segments')
     parser.add_argument('--outname', default=None, required=True,
@@ -1551,6 +1737,8 @@ if __name__ == "__main__":
             help='Subfolder for original masks')
     parser.add_argument('--step', type=int, default=1, required=False,
             help='Frame step, 1 to run all the dataset')
+    parser.add_argument('--seqs', type=str, default=None, required=False,
+            help='Path to file containing shortlist of specific sequence to be processed')
     flags = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = str(flags.gpu)
@@ -1566,10 +1754,12 @@ if __name__ == "__main__":
 
     logging.basicConfig(filename='example.log',level=logging.DEBUG)
     myrn = rn.Random()
-    myrn.seed(int(flags.range[0]))
+    myrn.seed(123)#int(flags.range[0]))
     if flags.single:
         main()
     elif flags.all41:
         one_for_all(int(flags.range[0]), int(flags.range[1]))
+    elif flags.addbg:
+        replace_BG()
     else:
         generic_pipeline(int(flags.range[0]), int(flags.range[1]))

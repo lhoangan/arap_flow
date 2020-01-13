@@ -4,6 +4,27 @@ Flow Datasets for Videos in the Wild"
 
 ## Installation
 
+### Requirement
+
+The ARAP image deformation used in this repository is adapted from the implementation
+provided with the [Opt](https://github.com/niessner/Opt) language.
+
+The requirement is
+- [terra release-2016-03-25](https://github.com/terralang/terra/releases)
+- [CUDA 7.5](https://developer.nvidia.com/cuda-75-downloads-archive)
+
+```sh
+mkdir arap_env
+git clone https://github.com/lhoangan/arap-flow.git
+
+# Download terra 2016-03-25 for Linux
+wget https://github.com/terralang/terra/releases/download/release-2016-03-25/terra-Linux-x86_64-332a506.zip
+unzip terra-Linux-x86_64-332a506.zip
+mv terra-Linux-x86_64-332a506 arap-flow/terra
+
+
+```
+
 Download terra, change name to `terra`
 
 move it to the same level as Warp

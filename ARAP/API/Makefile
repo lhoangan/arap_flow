@@ -6,6 +6,7 @@ TERRA ?= $(TERRA_HOME)/bin/terra
 all: release/lib/libOpt.a release/lib/libOptDev.a
 
 release/lib/libOpt.a:	$(wildcard src/*.t)
+	@mkdir build
 	@mkdir -p release/lib
 	$(TERRA) src/createwrapper.t Opt src o release/include/Opt.h build/wrapper.o true
 	rm -rf $@

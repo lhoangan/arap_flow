@@ -19,6 +19,7 @@ provided with the [Opt](https://github.com/niessner/Opt) language.
 The requirement is
 - [terra release-2016-03-25](https://github.com/terralang/terra/releases)
 - [CUDA 7.5](https://developer.nvidia.com/cuda-75-downloads-archive)
+- clang
 
 
 #### Terra

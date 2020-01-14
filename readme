@@ -1,0 +1,41 @@
+## Example running YoutubeVOS
+
+
+
+
+run
+
+`export INCLUDE_PATH=/usr/local/cuda-7.5/include`
+
+`export CUDA_HOME=/usr/local/cuda-7.5`
+
+`export LD_LIBRARY_PATH=/home/hle1/anaconda2/lib:$LD_LIBRARY_PATH`
+
+`python para_gen.py --gpu 0 1 2 3 --input data/YoutubeVOS/org/ --output data/YoutubeVOS/out/ --fd 1 --outname fd1 --size 854 480 --multseg --single --seqs data/YoutubeVOS/seq_shortlist`
+
+
+
+#### With anaconda
+
+for CUDA higher than 7.5 (tested with 9.0)
+use the newest version of terra
+[terra release](https://github.com/zdevito/terra/releases)
+
+tested with anaconda clang 3.8.1, (here)[https://anaconda.org/statiskit/clang]
+`conda install -c statiskit clang `
+
+[LLVM release](http://releases.llvm.org/download.html)
+Update environmental variable $PATH, $LD_LIBRARY_PATH, and $INCLUDE_PATH
+LLVM 5.0.0
+
+LLVM 6.0.0
+
+LLVM 7.0
+conda install -c conda-forge/label/gcc7 clangdev
+
+conda install -c anaconda zlib
+put -lz to after -ltinfo
+
+insert flag `-ltinfo` alongside each instance of `-lpthread` or `-pthread`
+maybe install libtinfo if necessary. Refered from (here)[https://github.com/halide/Halide/issues/1112]
+

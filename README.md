@@ -124,7 +124,7 @@ consider citing this paper
 ```
 
 ## Reference
-Please consider citing the following work if you are using this implementation.
+This implementation is based on several work
 - ARAP image deformation is implemented using Opt: A Domain Specific Language 
 for Non-linear Least Squares Optimization in Graphics and Imaging, given as
 example at https://github.com/niessner/Opt

@@ -1,6 +1,5 @@
 # Optical Flow ground truth using As-Rigid-As-Possible image deformation
-This is the implementation for the paper "Unsupervised Generation of Optical 
-Flow Datasets for Videos in the Wild"
+This is the implementation for the paper "Unsupervised Generation of Optical Flow Datasets"
 
 ## Installation
 

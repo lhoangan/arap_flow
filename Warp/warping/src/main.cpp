@@ -131,7 +131,7 @@ void rasterizeTriangle(ColorImageR8G8B8 &result,
                     t2.x, t2.y, 1.0f, (float)x, (float)y, &b0, &b1, &b2)) {
                     vec3uc val = c0*b0 + c1*b1 + c2*b2;
                     if (ismask)
-                        result(x, y) = int(val > 0) * 255;
+                        result(x, y) = int(val > (void *)0) * 255;
                     else
                         result(x, y) = val;
                 }

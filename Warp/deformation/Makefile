@@ -1,4 +1,4 @@
-EXECUTABLE = image_warping
+EXECUTABLE = arap_deform
 OBJS = build/mLibSource.o build/main.o
 CXX = clang++
 LINK = clang++

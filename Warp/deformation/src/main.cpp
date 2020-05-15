@@ -12,15 +12,15 @@ struct inputPaths {
 
 void usage() {
 #define p(msg)  printf(msg "\n");
-    p("Usage:");
-    p("./warp_image image mask constraints flow warped_image warped_mask");
-    p("Mask and warp image using the provided optical flow field.")
-    p("\timage: path to image with png extension")
-    p("\tmask: path to mask image with png extension, 0 for object, 1 for background")
-    p("\tconstraints: path to list of constraints, text file")
-    p("\tflo: path to optical flow image with flo extension")
-    p("\twarped_image: path to output warped image (.png), all intermediate directories must exist")
-    p("\twarped_mask: path to output warped mask (.png), all intermediate directories must exist")
+    p("Usage:\n");
+    p("./arap_deform RGB Mask Constraint Flow warped_RGB warped_Mask\n");
+    p("Mask and warp image using the provided optical flow field.\n")
+    p("RGB \t\t [input]  path to an input RGB image (.png only)")
+    p("Mask\t\t [input]  path to an input mask image (.png only) where 0 for object, 1 for background")
+    p("Constraint \t [input]  path to list of constraints, text file")
+    p("Flow \t\t [output] path to optical flow image with (.flo only)")
+    p("warped_RGB \t [output] path to output warped image (.png), all intermediate directories must exist")
+    p("warped_Mask \t [output] path to output warped mask (.png), all intermediate directories must exist")
 }
 
 static
@@ -207,7 +207,7 @@ int main(int argc, const char * argv[]) {
     printf("Optimization plan at %s\n", planPath);
     std::ifstream f(planPath);
     if (!f.good()) {
-        printf (" Not found! Please run export ARAP_PLAN=/path/to/plan.t or copy"
+        printf (" Not found! Please run export ARAP_PLAN=/path/to/plan.t or copy "
                 "the file to the running folder with name arap_plan.t");
         return 1;
     }

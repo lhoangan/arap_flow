@@ -20,13 +20,13 @@ clangdev                  7.0.0             h6c845d6_1000    conda-forge/label/g
 ### Usage
 `./arap_deform input_RGB input_Mask input_Constraint output_Flow warped_RGB warped_Mask`
 
-- `input_RGB` [**input]** path to an input RGB image (.png only)
+- `input_RGB` **[input]** path to an input RGB image (.png only)
 - `input_Mask` **[input]** path to an input mask image (.png only), where the object to
 be deformed is set to 0, background otherwise.
 - `input_Constraint` **[input]** path to the *input* constraint list, text file of the following format
   - First line: integer `n` of number of constraints
   - The next `n` lines: four-tuple of x<sub>1</sub> y<sub>1</sub> x<sub>2</sub> y<sub>2</sub>, separated by tabs or spaces
-- `output_Flow` [**output]** path to output the optical flow field (.flo only). All intermedite directories must exists.
+- `output_Flow` **[output]** path to output the optical flow field (.flo only). All intermedite directories must exists.
 - `warped_RGB` **[output]** path to output the warped image (including .png extension). All intermediate directories must exist.
 - `warped_Mask` **[output]** path to output the warped mask (including .png extension). All intermediate directories must exist. The output mask is inverted of the input's, i.e. objects is
 marked with 255, background with 0.
@@ -34,6 +34,7 @@ marked with 255, background with 0.
 **Example**:
 ```sh
 > make
+> export ARAP_PLAN=../../arap_plan.t
 > ./arap_deform cat512_iRGB.png cat512_iMsk.png cat512_iCstr.txt cat512_oFlo.flo cat512_oRGB.png cat512_oMsk.png
 ```
 Input

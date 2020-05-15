@@ -125,7 +125,5 @@ for Non-linear Least Squares Optimization in Graphics and Imaging, given as
 example at https://github.com/niessner/Opt
 - DeepMatching is developed by THOTH, INRIA, more detail at
 https://thoth.inrialpes.fr/src/deepmatching/
-- C++ flo IO is adapted from Middleburry implementation at
-http://vision.middlebury.edu/flow/code/flow-code/flowIO.cpp
-- Python flo IO and visualization is adapted
-https://github.com/jswulff/mrflow/tree/master/utils
+- C++ implemtation for flo IO is adapted from [Middleburry implementation](http://vision.middlebury.edu/flow/code/flow-code/flowIO.cpp)
+- Python implementation for flo IO and visualization is adapted from [MRFlow repo](https://github.com/jswulff/mrflow/tree/master/utils)

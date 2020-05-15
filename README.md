@@ -1,8 +1,14 @@
 # Optical Flow ground truth using As-Rigid-As-Possible image deformation
-This is the implementation for the paper "Unsupervised Generation of Optical 
-Flow Datasets for Videos in the Wild"
+This is the implementation for the paper "Unsupervised Generation of Optical Flow Datasets"
 
 ## Installation
+
+Start off by cloning the repository
+```sh
+git clone https://github.com/lhoangan/arap_flow.git
+cd arap_flow
+export ARAP_ROOT=$PWD
+```
 
 ### Requirement
 
@@ -12,68 +18,73 @@ provided with the [Opt](https://github.com/niessner/Opt) language.
 The requirement is
 - [terra release-2016-03-25](https://github.com/terralang/terra/releases)
 - [CUDA 7.5](https://developer.nvidia.com/cuda-75-downloads-archive)
+- clang
+
+
+#### Terra
+
+Download terra corresponding to your system and place it in the working folder.
 
 ```sh
-mkdir arap_env
-git clone https://github.com/lhoangan/arap-flow.git
-
+cd $ARAP_ROOT && \
 # Download terra 2016-03-25 for Linux
-wget https://github.com/terralang/terra/releases/download/release-2016-03-25/terra-Linux-x86_64-332a506.zip
-unzip terra-Linux-x86_64-332a506.zip
-mv terra-Linux-x86_64-332a506 arap-flow/terra
-
-
+wget https://github.com/terralang/terra/releases/download/release-2016-03-25/terra-Linux-x86_64-332a506.zip && \
+unzip terra-Linux-x86_64-332a506.zip && \
+mv terra-Linux-x86_64-332a506 arap_flow/terra && \
+rm terra-Linux-x86_64-332a506.zip
 ```
 
-Download terra, change name to `terra`
+#### CUDA 7.5
 
-move it to the same level as Warp
+Opt expects CUDA to be at `/usr/local/cuda`, if you are using a different
+directory, update `$CUDA_HOME` (for Linux) and `$CUDA_PATH` (for Windows).
+The Linux command is shown below.
 
-create folder build in Warp/API, `cd Warp/API; mkdir build`
+```sh
+> export CUDA_HOME=/usr/local/cuda-7.5
+```
 
-go to Warp/API, run `make`
+#### clang
 
-error: 
+Install clang with `sudo` previledge by running
+```sh
+sudo apt-get install clang
+```
+or, to use [Anaconda](https://www.anaconda.com/) environment, running:
+```sh
+conda install -c statiskit clang # v3.8.1
+```
 
-src/main.cpp:3:10: fatal error: 'cuda_runtime.h' file not found
-#include <cuda_runtime.h>
+### Building deep matching
 
-solution: export CUDA_HOME
+Download the latest version of
+[deep matching](https://thoth.inrialpes.fr/src/deepmatching/ "DeepMatching: Deep Convolutional Matching") and follow the provided instruction to compile it accordingly.
 
-### Opt
-https://github.com/niessner/Opt/blob/master/README.md
+For your convenience, we provide a downloading script in `./deepmatching` folder,
+for CPU, Version 1.2.2 (October 19<sup>th</sup>, 2015).
+Run by using the following commands
 
-CUDA 7.5
+```sh
+cd $ARAP_ROOT/deepmatching && \
+chmod +x get_deepmatching.sh && \
+./get_deepmatching.sh
+```
 
-#### With anaconda
+To build, simply run `make`
 
-v3.8.1
-conda install -c statiskit clang
+```sh
+cd $ARAP_ROOT/deepmatching/deepmatching_1.2.2_c++ && make
+```
 
-for CUDA higher than 7.5 (tested with 9.0)
-use the newest version of terra
-[terra release](https://github.com/zdevito/terra/releases)
-
-tested with anaconda clang 3.8.1, (here)[https://anaconda.org/statiskit/clang]
-`conda install -c statiskit clang `
-
-[LLVM release](http://releases.llvm.org/download.html)
-Update environmental variable $PATH, $LD_LIBRARY_PATH, and $INCLUDE_PATH
-LLVM 5.0.0
-
-LLVM 6.0.0
-
-LLVM 7.0
-conda install -c conda-forge/label/gcc7 clangdev
-
-conda install -c anaconda zlib
-put -lz to after -ltinfo
+### Building the ARAP deformation module
 
 
-for non-standard CUDA directories, update $CUDA_HOME (for Linux) and $CUDA_PATH (for Windows)
-
-insert flag `-ltinfo` alongside each instance of `-lpthread` or `-pthread`
-maybe install libtinfo if necessary. Refered from (here)[https://github.com/halide/Halide/issues/1112]
+Simply run `make` in 3 folders, namely `API`, `deformation`, and `warping`
+```sh
+cd $ARAP_ROOT/ARAP/API && make
+cd $ARAP_ROOT/ARAP/deformation && make
+cd $ARAP_ROOT/ARAP/warping && make
+```
 
 
 ## Usage
@@ -98,13 +109,6 @@ Flags:
 - fd: frame distance, 1 by default
 - size [width] [height] : one size to scale all images to, required
 
-
-
-
-## Pipeline
-
-## Datasets
-
 ## Citation
 
 If you find this implementation useful and have applied for your research, please
@@ -119,7 +123,7 @@ consider citing this paper
 ```
 
 ## Reference
-Please consider citing the following work if you are using this implementation.
+This implementation is based on several work
 - ARAP image deformation is implemented using Opt: A Domain Specific Language 
 for Non-linear Least Squares Optimization in Graphics and Imaging, given as
 example at https://github.com/niessner/Opt

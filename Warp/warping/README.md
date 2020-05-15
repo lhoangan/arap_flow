@@ -19,12 +19,12 @@ clangdev                  7.0.0             h6c845d6_1000    conda-forge/label/g
 ### Usage
 `./warp_image input_RGB input_Mask input_Flow warped_RGB warped_Mask`
 
-- `input_RGB` [input] path to input RGB image (.png only)
-- `input_Mask` [input] path to input mask image (.png only), where object to
+- `input_RGB` **[input]** path to an input RGB image (.png only)
+- `input_Mask` **[input]** path to an input mask image (.png only), where the object to
 be deformed is set to 0, background otherwise.
-- `input_Flow` [input] path to input optical flow field (.flo only)
-- `warped_RGB` [output] path to output warped image (including .png extension). All intermediate directories must exist.
-- `warped_Mask` [output] path to output warped mask (including .png extension). All intermediate directories must exist. The output mask is inverted of the input's, i.e. objects is
+- `input_Flow` **[input]** path to an input optical flow field (.flo only)
+- `warped_RGB` **[output]** path to the output warped image (including .png extension). All intermediate directories must exist.
+- `warped_Mask` **[output]** path to the output warped mask (including .png extension). All intermediate directories must exist. The output mask is inverted of the input's, i.e. objects is
 marked with 255, background with 0.
 
 **Example**:

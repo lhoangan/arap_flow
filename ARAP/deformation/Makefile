@@ -5,8 +5,8 @@ LINK = clang++
 NVCC = /usr/local/cuda/bin/nvcc
 SRC ?= src
 CUDAHOME += /usr/local/cuda
-TERRAHOME ?= ../../../terra
-TERRA ?= ../../../terra/release/terra
+TERRAHOME ?= ../../terra
+TERRA ?= ../../terra/release/terra
 
 ifeq ($(UNAME), Linux)
   S4 = 64

@@ -1,5 +1,5 @@
 # Optical Flow ground truth using As-Rigid-As-Possible image deformation
-This is the implementation for the paper "Unsupervised Generation of Optical Flow Datasets"
+This is the implementation for the paper "Automatic Generation of Dense Non-rigid Optical Flow"
 
 ## Installation
 

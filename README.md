@@ -1,6 +1,35 @@
 # Optical Flow ground truth using As-Rigid-As-Possible image deformation
 This is the implementation for the paper "Automatic Generation of Dense Non-rigid Optical Flow"
 
+## Dataset
+
+The dataset DMO is available at [here](http://isis-data.science.uva.nl/hale/DMO.zip)
+
+Please note the large file size: 59GB (zipped) and 132 GB (unzipped)
+
+The sub-directories include:
+```
+D15OM/
+|---fd1
+|---|---img1
+|---|---|---(vid1)
+|---|---img2
+|---fd2
+|---...
+|---fd5
+D15RM/
+Flow/
+|---fd1
+|---|---(vid1)
+|---fd2
+|---...
+|---fd5
+D15OM_list.txt
+D15RM_list.txt
+```
+As mentioned in the paper, `D15RM` and `D15OM` contains the same images with different textures, with D15OM having random textures, and hence the `Flow` data are shared between the 2 sets.
+The 3 directories `D15OM`, `D15RM` and `Flow` have similar structures as shown above, with `Flow` having 1 level short. The list files contain the images-flow correspondences.
+
 ## Installation
 
 Start off by cloning the repository
